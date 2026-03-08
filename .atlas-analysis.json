@@ -1,0 +1,113 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "BioKey",
+  "projectDescription": "Open-source biometric authentication protocol using WebAuthn PRF for passwordless, vendor-independent identity derivation from fingerprints.",
+  "theme": "aspen",
+  "primaryColor": "#3B82F6",
+  "lightColor": "#60A5FA",
+  "darkColor": "#1E40AF",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/how-it-works",
+              "concepts/key-derivation",
+              "concepts/security-model",
+              "concepts/protocol-specification"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/browser-sdk",
+              "guides/react-integration",
+              "guides/server-setup",
+              "guides/offline-mode"
+            ]
+          },
+          {
+            "group": "Examples",
+            "pages": [
+              "examples/vanilla-js",
+              "examples/react-app",
+              "examples/full-stack"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core Library",
+            "pages": [
+              "api/biokey-core/biokey-class",
+              "api/biokey-core/enroll",
+              "api/biokey-core/authenticate",
+              "api/biokey-core/utilities"
+            ]
+          },
+          {
+            "group": "Browser SDK",
+            "pages": [
+              "api/biokey-js/biokey-client",
+              "api/biokey-js/methods",
+              "api/biokey-js/types"
+            ]
+          },
+          {
+            "group": "React",
+            "pages": [
+              "api/biokey-react/use-biokey",
+              "api/biokey-react/hooks-api"
+            ]
+          },
+          {
+            "group": "Server",
+            "pages": [
+              "api/biokey-server/endpoints",
+              "api/biokey-server/database",
+              "api/biokey-server/deployment"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "WebAuthn PRF-based key derivation with HKDF fallback",
+    "Zero server-side biometric storage",
+    "Vendor-independent identity ownership",
+    "Multi-platform support (browser SDK, React hooks, auth server)",
+    "Open protocol specification (CC0 licensed)"
+  ],
+  "publicApiSurface": [
+    "BioKey.enroll()",
+    "BioKey.authenticate()",
+    "BioKeyClient.enroll(userId)",
+    "BioKeyClient.authenticate(userId)",
+    "BioKeyClient.getIdentity()",
+    "BioKeyClient.clearIdentity()",
+    "useBioKey(options)",
+    "POST /enroll",
+    "GET /challenge",
+    "POST /verify",
+    "deriveKey(rawId)",
+    "extractPRFOutput(credential)",
+    "isPRFSupported()",
+    "bufToHex(buffer)",
+    "hexToBuf(hex)"
+  ]
+}
