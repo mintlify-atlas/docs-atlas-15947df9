@@ -8,7 +8,7 @@ The `enroll()` function creates a new WebAuthn credential with PRF extension sup
 ## Function Signature
 
 ```javascript
-import { enroll } from '@biokey/core'
+import { enroll } from 'biokey-core'
 
 const identity = await enroll(rpId, rpName)
 ```
@@ -54,7 +54,7 @@ Returns a Promise that resolves to an identity object:
 ## Example
 
 ```javascript
-import { enroll } from '@biokey/core'
+import { enroll } from 'biokey-core'
 
 try {
   const identity = await enroll('example.com', 'My App')

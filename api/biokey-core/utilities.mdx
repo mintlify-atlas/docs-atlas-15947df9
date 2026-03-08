@@ -3,7 +3,7 @@ title: 'Utilities'
 description: 'Helper functions for key derivation and encoding'
 ---
 
-The `@biokey/core` package exports utility functions for working with cryptographic keys, buffers, and the WebAuthn PRF extension.
+The `biokey-core` package exports utility functions for working with cryptographic keys, buffers, and the WebAuthn PRF extension.
 
 ## Encoding Utilities
 
@@ -12,7 +12,7 @@ The `@biokey/core` package exports utility functions for working with cryptograp
 Converts an ArrayBuffer or Uint8Array to a hex string.
 
 ```javascript
-import { bufToHex } from '@biokey/core'
+import { bufToHex } from 'biokey-core'
 
 const hex = bufToHex(buffer)
 ```
@@ -36,7 +36,7 @@ const hex = bufToHex(buffer) // 'ff0080'
 Converts a hex string to an ArrayBuffer.
 
 ```javascript
-import { hexToBuf } from '@biokey/core'
+import { hexToBuf } from 'biokey-core'
 
 const buffer = hexToBuf(hex)
 ```
@@ -62,7 +62,7 @@ const buffer = hexToBuf(hex) // ArrayBuffer with [255, 0, 128]
 Derives a 256-bit key from a credential's rawId using HKDF-SHA256. This is the V1 fallback method for environments without PRF support.
 
 ```javascript
-import { deriveKey } from '@biokey/core'
+import { deriveKey } from 'biokey-core'
 
 const key = await deriveKey(rawId)
 ```
@@ -99,7 +99,7 @@ const publicKey = bufToHex(seed)
 Checks if a credential supports the PRF extension.
 
 ```javascript
-import { isPRFSupported } from '@biokey/core'
+import { isPRFSupported } from 'biokey-core'
 
 const supported = isPRFSupported(credential)
 ```
@@ -125,7 +125,7 @@ if (isPRFSupported(credential)) {
 Extracts the PRF output from a credential's extension results.
 
 ```javascript
-import { extractPRFOutput } from '@biokey/core'
+import { extractPRFOutput } from 'biokey-core'
 
 const output = extractPRFOutput(credential)
 ```
@@ -161,7 +161,7 @@ if (prfOutput) {
 Constant salt value used for PRF extension evaluation.
 
 ```javascript
-import { PRF_SALT } from '@biokey/core'
+import { PRF_SALT } from 'biokey-core'
 ```
 
 <ResponseField name="PRF_SALT" type="Uint8Array">
@@ -193,7 +193,7 @@ import {
   extractPRFOutput,
   isPRFSupported,
   PRF_SALT
-} from '@biokey/core'
+} from 'biokey-core'
 
 // Create credential with PRF
 const credential = await navigator.credentials.create({

@@ -8,7 +8,7 @@ The `authenticate()` function verifies a previously enrolled biometric identity 
 ## Function Signature
 
 ```javascript
-import { authenticate } from '@biokey/core'
+import { authenticate } from 'biokey-core'
 
 const result = await authenticate(identity, rpId)
 ```
@@ -62,7 +62,7 @@ Returns a Promise that resolves to a verification result:
 ## Example
 
 ```javascript
-import { authenticate } from '@biokey/core'
+import { authenticate } from 'biokey-core'
 
 // Retrieve stored identity
 const identity = JSON.parse(localStorage.getItem('biokey-identity'))
