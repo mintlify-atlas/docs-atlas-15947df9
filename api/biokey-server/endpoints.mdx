@@ -1,0 +1,170 @@
+---
+title: 'API Endpoints'
+description: 'Complete API reference for BioKey Server endpoints'
+---
+
+The BioKey Server exposes three REST API endpoints for biometric authentication. All endpoints accept and return JSON.
+
+## POST /enroll
+
+Enroll a new user identity with their public key and device information.
+
+### Request
+
+<ParamField path="userId" type="string" required>
+  Unique identifier for the user
+</ParamField>
+
+<ParamField path="publicKey" type="string" required>
+  64-character hex-encoded public key generated from biometric data
+</ParamField>
+
+<ParamField path="deviceId" type="string" required>
+  Unique identifier for the user's device
+</ParamField>
+
+<ParamField path="method" type="string" default="rawid">
+  Biometric method used (e.g., 'rawid', 'faceid', 'touchid')
+</ParamField>
+
+### Response
+
+<ResponseField name="ok" type="boolean">
+  Whether enrollment was successful
+</ResponseField>
+
+<ResponseField name="userId" type="string">
+  The enrolled user ID
+</ResponseField>
+
+<ResponseField name="publicKey" type="string">
+  The enrolled public key
+</ResponseField>
+
+<ResponseField name="method" type="string">
+  The biometric method used
+</ResponseField>
+
+### Status Codes
+
+- **200**: Successfully enrolled
+- **400**: Missing required fields or invalid publicKey format (must be 64 characters)
+- **500**: Enrollment failed (database error)
+
+### Example
+
+```bash
+curl -X POST https://your-server.com/enroll \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user123",
+    "publicKey": "a1b2c3d4e5f6...",
+    "deviceId": "device456",
+    "method": "rawid"
+  }'
+```
+
+```json Response
+{
+  "ok": true,
+  "userId": "user123",
+  "publicKey": "a1b2c3d4e5f6...",
+  "method": "rawid"
+}
+```
+
+## GET /challenge
+
+Generate a new authentication challenge. Challenges are valid for 5 minutes.
+
+### Response
+
+<ResponseField name="challenge" type="string">
+  A 64-character hex-encoded random challenge
+</ResponseField>
+
+### Status Codes
+
+- **200**: Challenge generated successfully
+
+### Example
+
+```bash
+curl https://your-server.com/challenge
+```
+
+```json Response
+{
+  "challenge": "7f8e9d0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e"
+}
+```
+
+## POST /verify
+
+Verify a user's identity using a challenge. Challenges are single-use and expire after 5 minutes.
+
+### Request
+
+<ParamField path="userId" type="string" required>
+  The user ID to verify
+</ParamField>
+
+<ParamField path="challenge" type="string" required>
+  The challenge obtained from GET /challenge
+</ParamField>
+
+### Response
+
+<ResponseField name="verified" type="boolean">
+  Whether verification was successful
+</ResponseField>
+
+<ResponseField name="publicKey" type="string">
+  The user's public key (returned on success)
+</ResponseField>
+
+<ResponseField name="userId" type="string">
+  The verified user ID
+</ResponseField>
+
+<ResponseField name="method" type="string">
+  The biometric method associated with this identity
+</ResponseField>
+
+### Status Codes
+
+- **200**: Successfully verified
+- **400**: Missing required fields
+- **401**: Invalid or expired challenge
+- **404**: Unknown userId
+
+### Example
+
+```bash
+curl -X POST https://your-server.com/verify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user123",
+    "challenge": "7f8e9d0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e"
+  }'
+```
+
+```json Response
+{
+  "verified": true,
+  "publicKey": "a1b2c3d4e5f6...",
+  "userId": "user123",
+  "method": "rawid"
+}
+```
+
+## Error Responses
+
+All endpoints return error responses in the following format:
+
+```json
+{
+  "error": "Error message",
+  "detail": "Additional error details (optional)"
+}
+```

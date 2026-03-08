@@ -1,0 +1,515 @@
+---
+title: Offline Mode Guide
+description: Build passwordless authentication without a backend server using local-only credential storage
+---
+
+BioKey can operate entirely client-side without a backend server. This is perfect for:
+
+- Static sites and single-page applications
+- Progressive Web Apps (PWAs)
+- Electron/Tauri desktop apps
+- Browser extensions
+- Prototypes and demos
+
+## How It Works
+
+In offline mode:
+
+1. Credentials are stored locally in `localStorage`
+2. Authentication happens entirely in the browser using WebAuthn
+3. No network requests are made
+4. Each device maintains its own credential
+
+## Quick Start
+
+Simply omit the `serverUrl` parameter:
+
+```javascript
+import { BioKeyClient } from 'biokey-js'
+
+const biokey = new BioKeyClient({
+  rpId: location.hostname,
+  rpName: 'My App',
+  serverUrl: null  // Offline mode
+})
+```
+
+## Complete Example
+
+Here's a fully functional offline authentication app:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BioKey Offline Demo</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 600px;
+      margin: 50px auto;
+      padding: 20px;
+    }
+    .status {
+      padding: 15px;
+      border-radius: 8px;
+      margin: 20px 0;
+      background: #f0f0f0;
+    }
+    .status.success { background: #d4edda; color: #155724; }
+    .status.error { background: #f8d7da; color: #721c24; }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 6px;
+      font-size: 16px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover { background: #0056b3; }
+    button:disabled { background: #ccc; cursor: not-allowed; }
+    .info { background: #e7f3ff; padding: 15px; border-radius: 6px; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>BioKey Offline Demo</h1>
+  
+  <div id="status" class="status"></div>
+  
+  <div id="app"></div>
+
+  <div class="info">
+    <strong>ℹ️ Offline Mode:</strong> Your credentials are stored locally on this device only.
+    They will not sync to other devices.
+  </div>
+
+  <script type="module">
+    import { BioKeyClient } from 'https://esm.sh/biokey-js'
+
+    const biokey = new BioKeyClient({
+      rpId: location.hostname,
+      rpName: 'BioKey Offline Demo',
+      serverUrl: null
+    })
+
+    const statusEl = document.getElementById('status')
+    const appEl = document.getElementById('app')
+
+    function setStatus(message, type = 'info') {
+      statusEl.textContent = message
+      statusEl.className = `status ${type}`
+    }
+
+    function render() {
+      const identity = biokey.getIdentity()
+
+      if (!identity) {
+        // Not enrolled - show enrollment UI
+        appEl.innerHTML = `
+          <h2>Get Started</h2>
+          <p>Enable biometric authentication for this device.</p>
+          <button id="enrollBtn">Enable Biometric Login</button>
+        `
+        setStatus('Not enrolled. Click the button to get started.')
+        document.getElementById('enrollBtn').addEventListener('click', handleEnroll)
+      } else {
+        // Enrolled - show authentication UI
+        appEl.innerHTML = `
+          <h2>Welcome Back</h2>
+          <p><strong>Device ID:</strong> ${identity.deviceId}</p>
+          <p><strong>Method:</strong> ${identity.method}</p>
+          <p><strong>Enrolled:</strong> ${new Date(identity.enrolledAt).toLocaleString()}</p>
+          <button id="authBtn">Authenticate</button>
+          <button id="clearBtn">Remove Credentials</button>
+        `
+        setStatus('✓ Biometric login is enabled for this device', 'success')
+        document.getElementById('authBtn').addEventListener('click', handleAuth)
+        document.getElementById('clearBtn').addEventListener('click', handleClear)
+      }
+    }
+
+    async function handleEnroll() {
+      setStatus('Enrolling... Please use your biometric sensor')
+      try {
+        const identity = await biokey.enroll()
+        setStatus(`✓ Enrollment successful! Method: ${identity.method}`, 'success')
+        render()
+      } catch (error) {
+        setStatus(`✗ Enrollment failed: ${error.message}`, 'error')
+      }
+    }
+
+    async function handleAuth() {
+      setStatus('Authenticating... Please use your biometric sensor')
+      try {
+        const result = await biokey.authenticate()
+        setStatus(`✓ Authentication successful! Key: ${result.publicKey.slice(0, 16)}...`, 'success')
+      } catch (error) {
+        setStatus(`✗ Authentication failed: ${error.message}`, 'error')
+      }
+    }
+
+    function handleClear() {
+      if (confirm('Remove biometric credentials from this device?')) {
+        biokey.clearIdentity()
+        setStatus('Credentials removed')
+        render()
+      }
+    }
+
+    // Initial render
+    render()
+  </script>
+</body>
+</html>
+```
+
+## React Offline Example
+
+```jsx
+import { useBioKey } from 'biokey-react'
+import { useState } from 'react'
+
+function OfflineAuthApp() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+
+  const { 
+    identity, 
+    status, 
+    error, 
+    isEnrolled, 
+    isLoading,
+    enroll, 
+    authenticate, 
+    reset 
+  } = useBioKey({
+    rpId: location.hostname,
+    rpName: 'My Offline App',
+    serverUrl: null  // Offline mode
+  })
+
+  const handleEnroll = async () => {
+    try {
+      await enroll()  // No userId needed in offline mode
+      alert('Biometric login enabled!')
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const handleLogin = async () => {
+    try {
+      await authenticate()  // No userId needed
+      setIsAuthenticated(true)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  if (isAuthenticated) {
+    return (
+      <div>
+        <h1>✓ Authenticated</h1>
+        <p>Welcome! You are authenticated on this device.</p>
+        <p>Public Key: {identity?.publicKey?.slice(0, 20)}...</p>
+        <button onClick={() => setIsAuthenticated(false)}>Logout</button>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <h1>Offline Authentication</h1>
+      
+      {error && <div style={{ color: 'red' }}>{error}</div>}
+      
+      <div style={{ background: '#e7f3ff', padding: '15px', borderRadius: '6px', margin: '20px 0' }}>
+        ℹ️ <strong>Offline Mode:</strong> Credentials are stored locally and do not sync.
+      </div>
+
+      {!isEnrolled ? (
+        <div>
+          <p>Biometric login is not enabled for this device.</p>
+          <button onClick={handleEnroll} disabled={isLoading}>
+            {isLoading ? 'Enrolling...' : 'Enable Biometric Login'}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <p>✓ Biometric login is enabled</p>
+          <p>Enrolled: {new Date(identity.enrolledAt).toLocaleString()}</p>
+          <button onClick={handleLogin} disabled={isLoading}>
+            {isLoading ? 'Authenticating...' : 'Login'}
+          </button>
+          <button onClick={reset}>Remove Credentials</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default OfflineAuthApp
+```
+
+## Storage Details
+
+### What's Stored
+
+BioKey stores the following in `localStorage`:
+
+```javascript
+{
+  "publicKey": "3a4f2b1c...",      // 64-character hex string
+  "credentialId": "a1b2c3d4...",   // Hex-encoded credential ID
+  "deviceId": "8f4e2a1b",          // Unique device fingerprint
+  "enrolledAt": 1709856000000,     // Timestamp
+  "method": "prf"                   // "prf" or "rawid"
+}
+```
+
+Storage key format: `biokey:${rpId}`
+
+Example: `biokey:example.com`
+
+### Access Storage Directly
+
+```javascript
+// Get stored identity
+const raw = localStorage.getItem('biokey:' + location.hostname)
+const identity = raw ? JSON.parse(raw) : null
+
+// Clear credentials
+localStorage.removeItem('biokey:' + location.hostname)
+```
+
+## Device Fingerprinting
+
+BioKey generates a stable device ID based on:
+
+- User agent string
+- Browser language
+- Screen dimensions
+- Timezone
+
+This creates a consistent identifier across sessions without cookies.
+
+```javascript
+// Device ID is automatically generated
+const identity = await biokey.enroll()
+console.log(identity.deviceId)  // "8f4e2a1b"
+```
+
+## Use Cases
+
+### 1. Static Site Authentication
+
+Add authentication to a GitHub Pages site:
+
+```javascript
+const biokey = new BioKeyClient({
+  rpId: 'yourusername.github.io',
+  rpName: 'My Static Site',
+  serverUrl: null
+})
+
+// Protect content
+const identity = biokey.getIdentity()
+if (!identity) {
+  window.location.href = '/login.html'
+} else {
+  await biokey.authenticate()
+  // Show protected content
+}
+```
+
+### 2. Progressive Web App
+
+PWA with offline authentication:
+
+```javascript
+// Service worker caches the app
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open('biokey-v1').then((cache) => {
+      return cache.addAll([
+        '/',
+        '/index.html',
+        '/app.js',
+        '/styles.css'
+      ])
+    })
+  )
+})
+
+// Main app uses offline auth
+const biokey = new BioKeyClient({ serverUrl: null })
+```
+
+### 3. Browser Extension
+
+Secure extension settings:
+
+```javascript
+// background.js or content script
+import { BioKeyClient } from 'biokey-js'
+
+const biokey = new BioKeyClient({
+  rpId: chrome.runtime.id,
+  rpName: 'My Extension',
+  serverUrl: null
+})
+
+// Protect sensitive actions
+chrome.action.onClicked.addListener(async () => {
+  try {
+    await biokey.authenticate()
+    // Perform protected action
+  } catch (error) {
+    console.error('Authentication required')
+  }
+})
+```
+
+### 4. Electron App
+
+Desktop app authentication:
+
+```javascript
+// renderer.js
+const { BioKeyClient } = require('biokey-js')
+
+const biokey = new BioKeyClient({
+  rpId: 'localhost',
+  rpName: 'My Desktop App',
+  serverUrl: null
+})
+
+// Use throughout your app
+window.biokey = biokey
+```
+
+## Limitations
+
+### No Multi-Device Sync
+
+Credentials are device-specific. Users must enroll on each device separately.
+
+**Solution:** Use server mode if you need multi-device support.
+
+### No User Association
+
+Without a server, there's no way to link credentials to specific users.
+
+**Solution:** Store additional user data separately in `localStorage` or IndexedDB.
+
+### Browser Data Clearing
+
+Clearing browser data removes credentials.
+
+**Solution:** 
+- Warn users before clearing data
+- Provide easy re-enrollment
+- Use IndexedDB for more persistent storage:
+
+```javascript
+// Custom storage implementation
+class IndexedDBStorage {
+  async save(key, value) {
+    // Store in IndexedDB instead of localStorage
+  }
+  async load(key) {
+    // Load from IndexedDB
+  }
+}
+```
+
+### No Challenge Validation
+
+Without a server, challenges aren't validated against previous requests.
+
+**Impact:** Low security risk since authentication still requires biometric verification.
+
+## Combining Offline and Server Modes
+
+You can switch between modes:
+
+```javascript
+class AdaptiveBioKey {
+  constructor(serverUrl) {
+    this.client = new BioKeyClient({
+      rpId: location.hostname,
+      rpName: 'My App',
+      serverUrl: navigator.onLine ? serverUrl : null
+    })
+  }
+
+  async enroll(userId) {
+    return this.client.enroll(navigator.onLine ? userId : undefined)
+  }
+
+  async authenticate(userId) {
+    return this.client.authenticate(navigator.onLine ? userId : undefined)
+  }
+}
+
+const biokey = new AdaptiveBioKey('https://api.example.com')
+```
+
+## Best Practices
+
+1. **Clear messaging** - Tell users their credentials are device-specific
+2. **Easy re-enrollment** - Make it simple to enroll again if credentials are lost
+3. **Graceful degradation** - Provide fallback authentication methods
+4. **Export option** - Let users export their public key for backup
+5. **Security notice** - Remind users that offline mode has no server-side validation
+
+## Migration to Server Mode
+
+To migrate from offline to server mode:
+
+<Steps>
+  <Step title="Export existing identities">
+    ```javascript
+    const identity = biokey.getIdentity()
+    console.log(identity)  // Save this data
+    ```
+  </Step>
+
+  <Step title="Update configuration">
+    ```javascript
+    const biokey = new BioKeyClient({
+      rpId: location.hostname,
+      rpName: 'My App',
+      serverUrl: 'https://api.example.com'  // Add server
+    })
+    ```
+  </Step>
+
+  <Step title="Re-enroll with userId">
+    ```javascript
+    // Users need to enroll again with a userId
+    await biokey.enroll('user@example.com')
+    ```
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Browser SDK" icon="js" href="/guides/browser-sdk">
+    Learn about all SDK features
+  </Card>
+  <Card title="React Integration" icon="react" href="/guides/react-integration">
+    Use with React applications
+  </Card>
+  <Card title="Server Setup" icon="server" href="/guides/server-setup">
+    Add multi-device sync with a server
+  </Card>
+  <Card title="Examples" icon="code" href="/examples/vanilla-js">
+    See more code examples
+  </Card>
+</CardGroup>

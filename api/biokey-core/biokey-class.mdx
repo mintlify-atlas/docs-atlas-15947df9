@@ -1,0 +1,110 @@
+---
+title: 'BioKey Class'
+description: 'Main class for biometric identity management'
+---
+
+The `BioKey` class provides a simple interface for creating and authenticating biometric identities using the WebAuthn API with PRF extension support.
+
+## Constructor
+
+```javascript
+const biokey = new BioKey(options)
+```
+
+<ParamField path="options" type="object" optional>
+  Configuration options for the BioKey instance
+  
+  <ParamField path="options.rpId" type="string" optional>
+    Relying Party ID - defaults to `location.hostname`
+  </ParamField>
+  
+  <ParamField path="options.rpName" type="string" optional>
+    Relying Party name - defaults to `'BioKey'`
+  </ParamField>
+</ParamField>
+
+## Methods
+
+### enroll()
+
+Creates a new biometric identity by registering a WebAuthn credential with PRF extension support.
+
+```javascript
+const identity = await biokey.enroll()
+```
+
+<ResponseField name="publicKey" type="string">
+  Hex-encoded public key derived from PRF output or rawId
+</ResponseField>
+
+<ResponseField name="credentialId" type="string">
+  Hex-encoded credential ID for future authentication
+</ResponseField>
+
+<ResponseField name="enrolledAt" type="number">
+  Unix timestamp of enrollment
+</ResponseField>
+
+<ResponseField name="method" type="'prf' | 'rawid'">
+  Derivation method used - `'prf'` for hardware-backed PRF extension, `'rawid'` for HKDF fallback
+</ResponseField>
+
+### authenticate(identity)
+
+Authenticates using a previously enrolled biometric identity.
+
+```javascript
+const result = await biokey.authenticate(identity)
+```
+
+<ParamField path="identity" type="object" required>
+  The identity object returned from `enroll()`
+  
+  <ParamField path="identity.credentialId" type="string" required>
+    Hex-encoded credential ID
+  </ParamField>
+  
+  <ParamField path="identity.publicKey" type="string" required>
+    Hex-encoded public key to verify against
+  </ParamField>
+  
+  <ParamField path="identity.method" type="'prf' | 'rawid'" required>
+    Derivation method used during enrollment
+  </ParamField>
+</ParamField>
+
+<ResponseField name="verified" type="boolean">
+  Always `true` if authentication succeeds (throws on failure)
+</ResponseField>
+
+<ResponseField name="publicKey" type="string">
+  Re-derived public key (matches enrolled publicKey if verified)
+</ResponseField>
+
+<ResponseField name="method" type="'prf' | 'rawid'">
+  Derivation method used for this authentication
+</ResponseField>
+
+## Example
+
+```javascript
+import { BioKey } from '@biokey/core'
+
+const biokey = new BioKey({
+  rpId: 'example.com',
+  rpName: 'Example App'
+})
+
+// Enroll new identity
+const identity = await biokey.enroll()
+localStorage.setItem('identity', JSON.stringify(identity))
+
+// Later: authenticate
+const stored = JSON.parse(localStorage.getItem('identity'))
+const result = await biokey.authenticate(stored)
+console.log('Authenticated:', result.verified)
+```
+
+## Source Reference
+
+See `/packages/biokey-core/src/index.js:5`

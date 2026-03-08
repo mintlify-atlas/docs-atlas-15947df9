@@ -1,0 +1,502 @@
+---
+title: Server Setup Guide
+description: Complete guide to deploying the BioKey server for multi-device credential synchronization
+---
+
+The BioKey server enables multi-device authentication by storing user credentials and managing challenge-response verification. It's built with Hono and Bun for high performance.
+
+## Overview
+
+The server provides three endpoints:
+
+- `POST /enroll` - Register a new user credential
+- `GET /challenge` - Generate authentication challenges
+- `POST /verify` - Verify authentication attempts
+
+## Quick Start
+
+<Steps>
+  <Step title="Install Bun">
+    The server requires Bun runtime:
+
+    ```bash
+    curl -fsSL https://bun.sh/install | bash
+    ```
+  </Step>
+
+  <Step title="Clone and install">
+    ```bash
+    git clone https://github.com/yourusername/biokey.git
+    cd biokey/packages/biokey-server
+    bun install
+    ```
+  </Step>
+
+  <Step title="Start the server">
+    ```bash
+    bun run dev
+    ```
+
+    The server will start on `http://localhost:3000`
+  </Step>
+</Steps>
+
+## Installation from Scratch
+
+### Create a New Project
+
+<Steps>
+  <Step title="Initialize project">
+    ```bash
+    mkdir biokey-server
+    cd biokey-server
+    bun init -y
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    bun add hono
+    ```
+  </Step>
+
+  <Step title="Update package.json">
+    ```json
+    {
+      "name": "biokey-server",
+      "type": "module",
+      "scripts": {
+        "dev": "bun --watch src/index.js",
+        "start": "bun src/index.js"
+      },
+      "dependencies": {
+        "hono": "^4.4.0"
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+### Create the Server
+
+Create the file structure:
+
+```
+biokey-server/
+├── src/
+│   ├── index.js
+│   ├── db.js
+│   └── routes/
+│       ├── enroll.js
+│       ├── challenge.js
+│       └── verify.js
+└── package.json
+```
+
+#### `src/db.js`
+
+Database layer using Bun's SQLite:
+
+```javascript
+import { Database } from 'bun:sqlite'
+
+const db = new Database('biokey.db')
+
+// Create tables
+db.run(`
+  CREATE TABLE IF NOT EXISTS identities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL UNIQUE,
+    public_key TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    method TEXT NOT NULL DEFAULT 'rawid',
+    created_at INTEGER NOT NULL
+  )
+`)
+
+db.run(`
+  CREATE TABLE IF NOT EXISTS challenges (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    challenge TEXT NOT NULL UNIQUE,
+    created_at INTEGER NOT NULL
+  )
+`)
+
+export function saveIdentity(userId, publicKey, deviceId, method = 'rawid') {
+  db.run(
+    `INSERT OR REPLACE INTO identities (user_id, public_key, device_id, method, created_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [userId, publicKey, deviceId, method, Date.now()]
+  )
+}
+
+export function getIdentity(userId) {
+  return db.query(`SELECT * FROM identities WHERE user_id = ?`).get(userId)
+}
+
+export function getIdentityByPublicKey(publicKey) {
+  return db.query(`SELECT * FROM identities WHERE public_key = ?`).get(publicKey)
+}
+
+export function saveChallenge(challenge) {
+  db.run(
+    `INSERT INTO challenges (challenge, created_at) VALUES (?, ?)`,
+    [challenge, Date.now()]
+  )
+}
+
+export function consumeChallenge(challenge) {
+  const row = db.query(`SELECT * FROM challenges WHERE challenge = ?`).get(challenge)
+  if (!row) return false
+  db.run(`DELETE FROM challenges WHERE challenge = ?`, [challenge])
+  const age = Date.now() - row.created_at
+  return age < 5 * 60 * 1000 // 5 minute expiry
+}
+
+export function cleanOldChallenges() {
+  const cutoff = Date.now() - 5 * 60 * 1000
+  db.run(`DELETE FROM challenges WHERE created_at < ?`, [cutoff])
+}
+```
+
+#### `src/routes/enroll.js`
+
+```javascript
+import { saveIdentity } from '../db.js'
+
+export function enrollRoute(app) {
+  app.post('/enroll', async (c) => {
+    const body = await c.req.json().catch(() => null)
+
+    if (!body?.userId || !body?.publicKey || !body?.deviceId) {
+      return c.json({ error: 'Missing required fields: userId, publicKey, deviceId' }, 400)
+    }
+
+    const { userId, publicKey, deviceId, method = 'rawid' } = body
+
+    if (typeof publicKey !== 'string' || publicKey.length !== 64) {
+      return c.json({ error: 'Invalid publicKey format' }, 400)
+    }
+
+    try {
+      saveIdentity(userId, publicKey, deviceId, method)
+      return c.json({ ok: true, userId, publicKey, method })
+    } catch (err) {
+      return c.json({ error: 'Enrollment failed', detail: err.message }, 500)
+    }
+  })
+}
+```
+
+#### `src/routes/challenge.js`
+
+```javascript
+import { saveChallenge, cleanOldChallenges } from '../db.js'
+
+function randomHex(bytes) {
+  return [...crypto.getRandomValues(new Uint8Array(bytes))]
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+export function challengeRoute(app) {
+  app.get('/challenge', (c) => {
+    cleanOldChallenges()
+    const challenge = randomHex(32)
+    saveChallenge(challenge)
+    return c.json({ challenge })
+  })
+}
+```
+
+#### `src/routes/verify.js`
+
+```javascript
+import { getIdentity, consumeChallenge } from '../db.js'
+
+export function verifyRoute(app) {
+  app.post('/verify', async (c) => {
+    const body = await c.req.json().catch(() => null)
+
+    if (!body?.userId || !body?.challenge) {
+      return c.json({ error: 'Missing required fields: userId, challenge' }, 400)
+    }
+
+    const { userId, challenge } = body
+
+    const identity = getIdentity(userId)
+    if (!identity) {
+      return c.json({ error: 'Unknown userId' }, 404)
+    }
+
+    const valid = consumeChallenge(challenge)
+    if (!valid) {
+      return c.json({ error: 'Invalid or expired challenge' }, 401)
+    }
+
+    return c.json({ 
+      verified: true, 
+      publicKey: identity.public_key, 
+      userId, 
+      method: identity.method 
+    })
+  })
+}
+```
+
+#### `src/index.js`
+
+Main server file:
+
+```javascript
+import { Hono } from 'hono'
+import { cors } from 'hono/cors'
+import { enrollRoute } from './routes/enroll.js'
+import { challengeRoute } from './routes/challenge.js'
+import { verifyRoute } from './routes/verify.js'
+
+const app = new Hono()
+
+app.use('*', cors())
+
+app.get('/', (c) => c.json({ name: 'biokey-server', version: '0.1.0' }))
+
+enrollRoute(app)
+challengeRoute(app)
+verifyRoute(app)
+
+const port = process.env.PORT ?? 3000
+console.log(`biokey-server running on port ${port}`)
+
+export default {
+  port,
+  fetch: app.fetch
+}
+```
+
+## Environment Variables
+
+Create a `.env` file:
+
+```bash
+PORT=3000
+```
+
+Load it in your deployment platform (Railway, Fly.io, etc.).
+
+## Deployment
+
+### Railway
+
+<Steps>
+  <Step title="Create railway.json">
+    ```json
+    {
+      "$schema": "https://railway.app/railway.schema.json",
+      "build": {
+        "builder": "NIXPACKS",
+        "buildCommand": "curl -fsSL https://bun.sh/install | bash && bun install"
+      },
+      "deploy": {
+        "startCommand": "bun run start",
+        "restartPolicyType": "ON_FAILURE",
+        "restartPolicyMaxRetries": 10
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Deploy">
+    ```bash
+    railway login
+    railway init
+    railway up
+    ```
+  </Step>
+
+  <Step title="Get your URL">
+    ```bash
+    railway domain
+    ```
+  </Step>
+</Steps>
+
+### Fly.io
+
+<Steps>
+  <Step title="Install flyctl">
+    ```bash
+    curl -L https://fly.io/install.sh | sh
+    ```
+  </Step>
+
+  <Step title="Create fly.toml">
+    ```toml
+    app = "biokey-server"
+    primary_region = "sjc"
+
+    [build]
+      dockerfile = "Dockerfile"
+
+    [http_service]
+      internal_port = 3000
+      force_https = true
+      auto_stop_machines = true
+      auto_start_machines = true
+
+    [[vm]]
+      cpu_kind = "shared"
+      cpus = 1
+      memory_mb = 256
+    ```
+  </Step>
+
+  <Step title="Create Dockerfile">
+    ```dockerfile
+    FROM oven/bun:1
+    WORKDIR /app
+    COPY package.json bun.lockb ./
+    RUN bun install --frozen-lockfile
+    COPY . .
+    EXPOSE 3000
+    CMD ["bun", "run", "start"]
+    ```
+  </Step>
+
+  <Step title="Deploy">
+    ```bash
+    fly launch
+    fly deploy
+    ```
+  </Step>
+</Steps>
+
+### Vercel (Serverless)
+
+Create `api/index.js`:
+
+```javascript
+import { Hono } from 'hono'
+import { handle } from 'hono/vercel'
+import { enrollRoute } from '../src/routes/enroll.js'
+import { challengeRoute } from '../src/routes/challenge.js'
+import { verifyRoute } from '../src/routes/verify.js'
+
+const app = new Hono().basePath('/api')
+
+enrollRoute(app)
+challengeRoute(app)
+verifyRoute(app)
+
+export default handle(app)
+```
+
+## Testing the Server
+
+### Manual Testing
+
+```bash
+# Health check
+curl http://localhost:3000/
+
+# Get a challenge
+curl http://localhost:3000/challenge
+
+# Enroll a user
+curl -X POST http://localhost:3000/enroll \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "test-user",
+    "publicKey": "3a4f2b1c8e9d6f7a5b2c1d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a",
+    "deviceId": "abc123",
+    "method": "prf"
+  }'
+
+# Verify authentication
+curl -X POST http://localhost:3000/verify \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "test-user",
+    "challenge": "<challenge from previous step>"
+  }'
+```
+
+## Database Management
+
+The SQLite database is stored in `biokey.db`.
+
+### Backup
+
+```bash
+cp biokey.db biokey.db.backup
+```
+
+### Inspect
+
+```bash
+bun sqlite3 biokey.db
+
+sqlite> SELECT * FROM identities;
+sqlite> SELECT * FROM challenges;
+sqlite> .quit
+```
+
+### Reset
+
+```bash
+rm biokey.db
+bun run start  # Will recreate tables
+```
+
+## Security Considerations
+
+1. **HTTPS Required** - Always use HTTPS in production. WebAuthn requires secure contexts.
+
+2. **CORS Configuration** - Restrict CORS to your domain in production:
+   ```javascript
+   app.use('*', cors({ origin: 'https://yourdomain.com' }))
+   ```
+
+3. **Rate Limiting** - Add rate limiting to prevent abuse:
+   ```bash
+   bun add @hono/rate-limiter
+   ```
+   ```javascript
+   import { rateLimiter } from '@hono/rate-limiter'
+   app.use('/enroll', rateLimiter({ windowMs: 60000, max: 5 }))
+   ```
+
+4. **Challenge Expiry** - Challenges expire after 5 minutes by default. Adjust in `db.js` if needed.
+
+5. **Database Encryption** - Consider encrypting the database file for additional security.
+
+## Monitoring
+
+Add basic logging:
+
+```javascript
+import { logger } from 'hono/logger'
+app.use('*', logger())
+```
+
+For production, integrate with services like:
+- Sentry for error tracking
+- LogTail for log management
+- Uptime Robot for availability monitoring
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Browser SDK" icon="js" href="/guides/browser-sdk">
+    Connect your client to the server
+  </Card>
+  <Card title="React Integration" icon="react" href="/guides/react-integration">
+    Use with React applications
+  </Card>
+  <Card title="Offline Mode" icon="wifi" href="/guides/offline-mode">
+    Build without a server
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/biokey-server/endpoints">
+    Full server API documentation
+  </Card>
+</CardGroup>

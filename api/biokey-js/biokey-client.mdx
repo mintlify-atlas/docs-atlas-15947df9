@@ -1,0 +1,93 @@
+---
+title: 'BioKeyClient'
+description: 'Main client class for browser-based biometric authentication'
+---
+
+## Overview
+
+The `BioKeyClient` class provides a high-level interface for implementing WebAuthn-based biometric authentication in web applications. It handles credential creation, authentication, and identity management using platform authenticators (Face ID, Touch ID, Windows Hello, etc.).
+
+## Constructor
+
+```javascript
+const client = new BioKeyClient(options)
+```
+
+### Options
+
+<ParamField path="rpId" type="string" default="location.hostname">
+  Relying Party identifier. Must match your domain (e.g., `"example.com"`).
+  
+  The `rpId` determines which domain credentials are bound to. It should be set to your root domain or a subdomain. WebAuthn credentials created with one `rpId` cannot be used with a different one.
+</ParamField>
+
+<ParamField path="rpName" type="string" default="'BioKey'">
+  Human-readable name for your application.
+  
+  This name is displayed to users during biometric prompts and credential management. Choose a name that clearly identifies your application.
+</ParamField>
+
+<ParamField path="serverUrl" type="string" default="null">
+  Optional backend server URL for server-side verification.
+  
+  When provided, the client will communicate with your backend server to:
+  - Register enrolled credentials during `enroll()`
+  - Fetch server-generated challenges during `authenticate()`
+  - Verify authentication results server-side
+  
+  Leave as `null` for client-only authentication (no backend required).
+</ParamField>
+
+## Usage Examples
+
+### Client-Only Authentication
+
+```javascript
+import { BioKeyClient } from '@biokey/browser'
+
+const client = new BioKeyClient({
+  rpId: 'myapp.com',
+  rpName: 'My Application'
+})
+```
+
+### Server-Backed Authentication
+
+```javascript
+const client = new BioKeyClient({
+  rpId: 'myapp.com',
+  rpName: 'My Application',
+  serverUrl: 'https://api.myapp.com/auth'
+})
+```
+
+### With Custom Domain
+
+```javascript
+const client = new BioKeyClient({
+  rpId: 'auth.myapp.com',
+  rpName: 'My Application Authentication'
+})
+```
+
+## Storage Key
+
+The client automatically generates a storage key for persisting identity information in `localStorage`:
+
+```javascript
+const storageKey = 'biokey:' + rpId
+```
+
+This key is used internally by `getIdentity()` and `clearIdentity()` methods to manage stored credentials.
+
+## Notes
+
+- The `rpId` must be a valid domain that matches or is a registrable suffix of the current origin
+- Credentials created with one `rpId` cannot be used with a different `rpId`
+- The `serverUrl` endpoints should implement the BioKey server protocol (see Server API documentation)
+- Identity data is stored in `localStorage` and persists across browser sessions
+
+## See Also
+
+- [Methods](/api/biokey-js/methods) - Available client methods
+- [Types](/api/biokey-js/types) - Type definitions and return values

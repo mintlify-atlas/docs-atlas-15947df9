@@ -1,0 +1,423 @@
+---
+title: Security Model
+description: Threat models, trust boundaries, and security considerations for BioKey
+---
+
+BioKey's security model is built on three principles: **biometric privacy**, **cryptographic derivation**, and **zero-knowledge server architecture**.
+
+## Trust Boundaries
+
+BioKey divides the authentication system into trusted and untrusted zones:
+
+```
+┌─────────────────────────────────────────┐
+│  TRUSTED (on device)                   │
+│  - Platform authenticator              │
+│  - WebAuthn API + PRF extension        │
+│  - HKDF derivation (V1 fallback only)  │
+│  - Identity Key storage (localStorage) │
+└─────────────────────────────────────────┘
+
+┌─────────────────────────────────────────┐
+│  UNTRUSTED (server-side)               │
+│  - Only public keys stored             │
+│  - Challenge issuance and verification │
+│  - No biometric data, ever             │
+└─────────────────────────────────────────┘
+```
+
+### On-Device (Trusted Zone)
+
+**Platform Authenticator**
+- Secure enclave or trusted execution environment (TEE)
+- Biometric sensor (fingerprint, Face ID, iris)
+- Credential private keys stored in hardware
+- PRF computation (V2) happens in secure element
+
+**WebAuthn API**
+- Browser-provided cryptographic primitives
+- Mediates access to platform authenticator
+- Enforces origin and RP ID binding
+- Returns public credential data and PRF outputs
+
+**Client-Side Key Derivation**
+- V2 (PRF): Hardware-backed, never exposed
+- V1 (HKDF): Computed in browser via Web Crypto API
+- Identity Key stored in `localStorage` (or `IndexedDB`)
+
+<Info>
+**Why localStorage is acceptable**: The Identity Key is a *public key* in BioKey's model. It can be re-derived from biometric authentication, so local storage compromise doesn't expose the biometric or enable impersonation (the attacker still needs the server challenge).
+</Info>
+
+### Server-Side (Untrusted Zone)
+
+The server is explicitly **untrusted** and stores only:
+- Public Identity Keys (64-char hex strings)
+- User IDs (for account linking)
+- Device IDs (for multi-device tracking)
+- Challenge nonces (time-limited, single-use)
+
+**The server never has:**
+- Biometric data (never leaves device)
+- Credential private keys (stored in device secure element)
+- PRF secrets (computed in hardware, never exposed)
+- Ability to authenticate without user's biometric
+
+<Warning>
+**Server compromise does NOT leak biometrics**. In a worst-case breach, an attacker gains:
+- Public Identity Keys (useless without biometric)
+- User metadata (device IDs, enrollment timestamps)
+
+The attacker cannot authenticate as users or reconstruct biometric data.
+</Warning>
+
+## What BioKey Protects Against
+
+### ✅ Credential Theft via Server Breach
+
+**Traditional password system:**
+```
+Server breach → Hashed passwords stolen → Offline cracking → Account takeover
+```
+
+**BioKey:**
+```
+Server breach → Public keys stolen → Useless without biometric → No account takeover
+```
+
+Even with database access, an attacker cannot authenticate without physical access to the enrolled biometric.
+
+### ✅ Vendor Lock-In
+
+**Traditional passkey (FIDO2/WebAuthn):**
+```
+Fingerprint → Unlocks → Private key in iCloud Keychain/Google Password Manager
+                     → Vendor controls your identity
+```
+
+**BioKey:**
+```
+Fingerprint → Derives → Identity Key (deterministic, client-side)
+                     → No vendor custody, no cloud sync required
+```
+
+Your identity is derived from your biometric, not stored in a vendor silo.
+
+### ✅ Replay Attacks
+
+BioKey uses challenge-response protocol to prevent replay:
+
+```
+1. Server issues challenge: crypto.getRandomValues(32 bytes)
+2. Challenge properties:
+   - Single-use (deleted after first verification)
+   - Time-limited (5-minute expiration)
+   - Cryptographically random
+3. Client authenticates with challenge
+4. Server validates and invalidates challenge
+```
+
+An attacker intercepting a valid challenge cannot reuse it:
+- Challenge is already consumed (single-use)
+- Challenge expires after 5 minutes
+- Challenge tied to specific authentication flow
+
+### ✅ Cross-Origin Abuse
+
+WebAuthn's **RP ID (Relying Party Identifier)** binds credentials to a specific origin:
+
+```js
+const credential = await navigator.credentials.create({
+  publicKey: {
+    rp: { id: 'example.com' }, // Must match current hostname
+    // ...
+  }
+})
+```
+
+A credential enrolled on `example.com` **cannot** be used on `evil.com`:
+- Browser enforces origin matching
+- Credential is origin-bound at creation
+- Prevents phishing via credential reuse
+
+<Note>
+**Subdomain considerations**: `rp.id` can be set to a parent domain (e.g., `example.com` for `app.example.com` and `auth.example.com`), allowing credential sharing across subdomains. This must be configured intentionally.
+</Note>
+
+## What BioKey Does NOT Protect Against
+
+### ❌ Compromised Device
+
+If the device is rooted/jailbroken or has malware:
+
+```
+Compromised device → Malware intercepts WebAuthn API
+                  → Malware exfiltrates Identity Key from localStorage
+                  → Attacker may authenticate while device is unlocked
+```
+
+**Mitigation strategies:**
+- Use device attestation (checks device integrity)
+- Require biometric re-authentication for sensitive operations
+- Implement anomaly detection (unusual IP, device fingerprint changes)
+- Revoke compromised device's public key server-side
+
+<Warning>
+BioKey assumes the device's platform authenticator and operating system are trusted. If the device is compromised, the biometric authentication mechanism is also compromised.
+</Warning>
+
+### ❌ PIN Fallback
+
+WebAuthn permits device PIN as a fallback authenticator:
+
+```js
+authenticatorSelection: {
+  userVerification: 'required' // Can be satisfied by PIN
+}
+```
+
+BioKey cannot enforce **biometric-only** authentication via WebAuthn API alone. The OS controls fallback behavior:
+
+| Platform | PIN Fallback Behavior |
+|----------|-----------------------|
+| iOS/macOS | Allows passcode after failed biometric attempts |
+| Android | Allows PIN/pattern after 5 failed fingerprint attempts |
+| Windows Hello | Allows PIN as alternative authentication method |
+
+**V3 roadmap**: Native mobile app using platform-specific APIs:
+- Android: `BiometricPrompt` with `BIOMETRIC_STRONG` (blocks PIN)
+- iOS: `LAContext` with `biometryOnly` policy
+
+### ❌ Cross-Sensor Attacks
+
+Different hardware sensors produce different credentials:
+
+```
+Sensor A (Device 1): Fingerprint → credentialId_A → Identity Key A
+Sensor B (Device 2): Same finger → credentialId_B → Identity Key B
+
+  Identity Key A ≠ Identity Key B
+```
+
+BioKey intentionally produces device-specific identities. This is a **security feature**, but means:
+- User must enroll each device separately
+- Lost device requires re-enrollment on new device
+- No "bring your biometric to any device" portability
+
+<Info>
+**Multi-device accounts**: Servers can link multiple Identity Keys to one user account, allowing seamless multi-device access while maintaining device-specific cryptographic isolation.
+</Info>
+
+### ❌ Biometric Compromise
+
+Biometrics are **irrevocable**:
+
+```
+Password compromised → Change password → Security restored
+Fingerprint compromised → Cannot change fingerprint → Permanent risk
+```
+
+**Threat scenarios:**
+- High-resolution photo of fingerprint (lifted from surface)
+- 3D-printed finger (requires sophisticated attack)
+- Deepfake face (for Face ID, requires liveness detection bypass)
+- Coerced authentication (physical duress)
+
+**Mitigation strategies:**
+
+1. **Liveness detection**: Platform authenticators implement liveness checks (e.g., Face ID requires attention, fingerprints detect conductivity)
+2. **Multi-finger enrollment**: Enroll backup fingers, revoke compromised finger's credential
+3. **Server-side revocation**: Delete public key from server to permanently invalidate compromised identity
+4. **Anomaly detection**: Monitor authentication patterns (location, device, time)
+5. **Hybrid authentication**: Require additional factor for high-risk operations (email OTP, recovery code)
+
+<Warning>
+**Duress scenario**: BioKey cannot prevent authentication under physical coercion (e.g., attacker forces user to scan finger). Consider implementing "duress finger" enrollment (special finger triggers alert instead of authentication).
+</Warning>
+
+## V2 (PRF) vs V1 (rawId-HKDF) Security Comparison
+
+| Aspect | V2 (PRF) | V1 (rawId-HKDF) |
+|--------|----------|----------------|
+| **Secret material** | Hardware-backed, never exposed | Derived from observable `rawId` |
+| **Attack surface** | Secure enclave only | `rawId` visible in WebAuthn responses |
+| **Cryptographic strength** | ✅ High (hardware PRF) | ⚠️ Medium (depends on `rawId` entropy) |
+| **Server observation** | ❌ Server never sees PRF output | ⚠️ Server sees `rawId` during enrollment/auth |
+| **Recommended usage** | Production systems | Fallback only |
+
+**V1 security consideration:**
+
+```js
+// rawId is transmitted in WebAuthn responses
+const credential = await navigator.credentials.create({...})
+
+console.log(credential.rawId) // ArrayBuffer visible to client
+// Server receives rawId during enrollment (in authenticatorAttestationResponse)
+```
+
+An attacker observing network traffic could capture `rawId`. With knowledge of the HKDF parameters (`biokey-v1-salt`, `biokey-identity-seed`), they could derive the same Identity Key.
+
+<Warning>
+**V1 is a fallback, not preferred**. Use V2 (PRF) wherever platform support allows. V1 provides identity stability but doesn't achieve the same zero-knowledge property as V2.
+</Warning>
+
+## Challenge Security
+
+Challenges prevent replay attacks and ensure real-time authentication:
+
+### Challenge Properties
+
+| Property | Specification | Security Rationale |
+|----------|--------------|-------------------|
+| **Length** | 32 bytes (256 bits) | Prevents brute-force guessing |
+| **Randomness** | `crypto.getRandomValues()` | Cryptographically secure RNG |
+| **Single-use** | Deleted after first verify | Prevents replay |
+| **Expiration** | 5 minutes | Limits window for MITM attacks |
+| **Encoding** | 64-char hex | URL-safe, easy transmission |
+
+### Challenge Flow
+
+```
+Client                          Server
+  |
+  |-- GET /challenge ----------->| Generate challenge
+  |                              | Store {challenge, timestamp}
+  |<-- {challenge} --------------||
+  |
+  | [User scans fingerprint]
+  |
+  |-- POST /verify ------------->| Lookup challenge
+  |   {userId, challenge}        | Check timestamp < 5 min
+  |                              | Check not already used
+  |                              | Lookup publicKey by userId
+  |<-- {verified: true} ----------| Delete challenge
+```
+
+### Server-Side Challenge Storage
+
+```js
+// In-memory or database
+const challenges = new Map()
+
+app.get('/challenge', (req, res) => {
+  const challenge = bufToHex(crypto.getRandomValues(new Uint8Array(32)))
+  challenges.set(challenge, { createdAt: Date.now() })
+  res.json({ challenge })
+})
+
+app.post('/verify', (req, res) => {
+  const { userId, challenge } = req.body
+  const stored = challenges.get(challenge)
+  
+  if (!stored) {
+    return res.status(401).json({ error: 'Invalid or expired challenge' })
+  }
+  
+  if (Date.now() - stored.createdAt > 5 * 60 * 1000) {
+    challenges.delete(challenge)
+    return res.status(401).json({ error: 'Challenge expired' })
+  }
+  
+  challenges.delete(challenge) // Single-use
+  
+  // Verify user identity...
+})
+```
+
+<Note>
+**Production considerations**: Use Redis or database for distributed systems. Clean up expired challenges periodically to prevent memory leaks.
+</Note>
+
+## Data Privacy
+
+### What is Stored Where?
+
+| Data | Client (Device) | Server | Notes |
+|------|----------------|--------|-------|
+| **Biometric data** | ✅ Secure element | ❌ Never | Never leaves device |
+| **Credential private key** | ✅ Secure element | ❌ Never | Hardware-protected |
+| **PRF output (V2)** | ❌ Re-derived | ❌ Never | Computed on-demand |
+| **Identity Key** | ✅ localStorage | ✅ As public key | Can be re-derived |
+| **Credential ID** | ✅ localStorage | ❌ Optional | Needed for authentication |
+| **User ID** | ✅ localStorage | ✅ Yes | Links identity to account |
+| **Device ID** | ✅ Generated | ✅ Yes | Tracks enrolled devices |
+| **Challenges** | ❌ No | ✅ Temporary | Single-use, 5-min TTL |
+
+### GDPR & Privacy Compliance
+
+BioKey's architecture inherently supports privacy regulations:
+
+**Right to erasure ("right to be forgotten"):**
+```js
+// Server-side
+DELETE FROM identities WHERE userId = :userId
+
+// Client-side
+localStorage.removeItem('biokey_identity')
+```
+
+Deleting the public key from the server makes authentication impossible, even if the user retains local data.
+
+**Data minimization:**
+- Server stores only public keys (not biometrics, not private keys)
+- No PII required (user ID can be pseudonymous)
+- No tracking of authentication attempts (optional audit logs)
+
+**Purpose limitation:**
+- Biometric used exclusively for authentication
+- Identity Key derived for single purpose (user verification)
+- No cross-service tracking (RP ID bound to origin)
+
+## Secure Implementation Checklist
+
+When implementing BioKey, ensure:
+
+- [ ] **Always attempt V2 (PRF) first**, fall back to V1 only if PRF unsupported
+- [ ] **Verify re-derived key matches stored publicKey** before sending challenge to server
+- [ ] **Use HTTPS everywhere** — BioKey requires secure context for WebAuthn
+- [ ] **Implement challenge expiration** (5 minutes recommended)
+- [ ] **Enforce single-use challenges** (delete after first verification)
+- [ ] **Validate RP ID matches your domain** (prevents cross-origin abuse)
+- [ ] **Store Identity Key in localStorage** (or IndexedDB), not sessionStorage
+- [ ] **Implement public key revocation** (delete from server to disable identity)
+- [ ] **Monitor authentication anomalies** (unusual IP, device changes, frequency)
+- [ ] **Consider device attestation** for high-security applications
+- [ ] **Test on multiple platforms** (Android, iOS, macOS, Windows)
+- [ ] **Handle PRF unavailability gracefully** (clear fallback UX)
+- [ ] **Document multi-device enrollment** for users
+- [ ] **Implement account recovery** (email OTP, recovery codes for device loss)
+
+<Warning>
+**Common security mistakes:**
+- Skipping key verification after re-derivation
+- Using challenges multiple times
+- Storing biometric data or credentials client-side
+- Trusting `method` field without verification
+- Not implementing challenge expiration
+- Allowing authentication without server challenge (except local-only mode)
+</Warning>
+
+## Threat Model Summary
+
+| Threat | Protected? | Mitigation |
+|--------|-----------|------------|
+| Server breach | ✅ Yes | Only public keys stored |
+| Replay attack | ✅ Yes | Single-use, time-limited challenges |
+| Vendor lock-in | ✅ Yes | Deterministic client-side derivation |
+| Cross-origin abuse | ✅ Yes | WebAuthn RP ID binding |
+| MITM attack | ✅ Yes | HTTPS + key verification |
+| Device compromise | ❌ No | Assume trusted device + secure element |
+| PIN fallback | ❌ No | OS controls fallback behavior |
+| Biometric compromise | ❌ No | Irrevocable + liveness detection |
+| Physical coercion | ❌ No | Out of scope for cryptographic protocol |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Protocol Specification" icon="file-lines" href="/concepts/protocol-specification">
+    Full technical specification of the BioKey protocol
+  </Card>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Implement BioKey in your application
+  </Card>
+</CardGroup>

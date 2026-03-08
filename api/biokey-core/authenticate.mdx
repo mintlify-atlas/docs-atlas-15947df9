@@ -1,0 +1,122 @@
+---
+title: 'authenticate()'
+description: 'Verify a biometric identity'
+---
+
+The `authenticate()` function verifies a previously enrolled biometric identity by re-deriving the key and comparing it to the stored public key.
+
+## Function Signature
+
+```javascript
+import { authenticate } from '@biokey/core'
+
+const result = await authenticate(identity, rpId)
+```
+
+## Parameters
+
+<ParamField path="identity" type="object" required>
+  The identity object returned from `enroll()`
+  
+  <ParamField path="identity.credentialId" type="string" required>
+    Hex-encoded credential ID
+  </ParamField>
+  
+  <ParamField path="identity.publicKey" type="string" required>
+    Hex-encoded public key to verify against
+  </ParamField>
+  
+  <ParamField path="identity.method" type="'prf' | 'rawid'" required>
+    Derivation method used during enrollment
+  </ParamField>
+</ParamField>
+
+<ParamField path="rpId" type="string" required>
+  Relying Party ID - must match the ID used during enrollment
+</ParamField>
+
+## Return Value
+
+Returns a Promise that resolves to a verification result:
+
+<ResponseField name="verified" type="boolean">
+  Always `true` when the function returns successfully (throws error on failure)
+</ResponseField>
+
+<ResponseField name="publicKey" type="string">
+  Re-derived public key (hex-encoded)
+</ResponseField>
+
+<ResponseField name="method" type="'prf' | 'rawid'">
+  - `'prf'`: PRF extension was used to re-derive the key
+  - `'rawid'`: HKDF fallback was used
+</ResponseField>
+
+## How It Works
+
+1. **WebAuthn Get**: Requests credential assertion with PRF extension
+2. **Re-Derivation**: Uses the same method (PRF or rawId-HKDF) to re-derive the key
+3. **Verification**: Compares re-derived key against stored `identity.publicKey`
+4. **Throws on Mismatch**: Raises an error if keys don't match or assertion fails
+
+## Example
+
+```javascript
+import { authenticate } from '@biokey/core'
+
+// Retrieve stored identity
+const identity = JSON.parse(localStorage.getItem('biokey-identity'))
+
+try {
+  const result = await authenticate(identity, 'example.com')
+  
+  console.log('Authentication successful!')
+  console.log('Verified:', result.verified) // true
+  console.log('Method:', result.method) // 'prf' or 'rawid'
+  
+  // User is authenticated - proceed with app logic
+  redirectToApp()
+} catch (error) {
+  console.error('Authentication failed:', error.message)
+  // Handle failure - show error, retry, etc.
+}
+```
+
+## Error Handling
+
+The function throws errors in these cases:
+
+```javascript
+// No identity provided
+throw new Error('No enrolled identity provided.')
+
+// No assertion returned from authenticator
+throw new Error('Authentication failed — no assertion returned.')
+
+// PRF key mismatch
+throw new Error('PRF key mismatch — identity verification failed.')
+
+// rawId-HKDF key mismatch
+throw new Error('Key mismatch — identity verification failed.')
+```
+
+## WebAuthn Configuration
+
+The function configures WebAuthn assertions with:
+
+- **Challenge**: 32 random bytes
+- **Allowed Credentials**: Only the provided credential ID
+- **User Verification**: Required
+- **PRF Extension**: Uses `evalByCredential` with the same salt as enrollment
+- **Timeout**: 60 seconds
+
+## Security Notes
+
+- The function verifies that the re-derived key matches the stored public key
+- PRF output is hardware-backed and never leaves the authenticator
+- rawId fallback is best-effort for environments without PRF support
+- Always use the same `rpId` for enrollment and authentication
+
+## Source Reference
+
+See `/packages/biokey-core/src/authenticate.js:9`

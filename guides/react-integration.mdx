@@ -1,0 +1,447 @@
+---
+title: React Integration Guide
+description: Complete guide to using the BioKey React hook for passwordless authentication in React applications
+---
+
+The BioKey React package (`biokey-react`) provides a convenient hook that wraps the JavaScript SDK with React state management.
+
+## Installation
+
+<Steps>
+  <Step title="Install the package">
+    ```bash
+    npm install biokey-react
+    ```
+
+    This automatically includes `biokey-js` as a dependency.
+  </Step>
+
+  <Step title="Import the hook">
+    ```javascript
+    import { useBioKey } from 'biokey-react'
+    ```
+  </Step>
+</Steps>
+
+## Basic Usage
+
+### Simple Login Component
+
+Here's a complete React component with biometric authentication:
+
+```jsx
+import { useBioKey } from 'biokey-react'
+
+function LoginPage() {
+  const { 
+    identity, 
+    status, 
+    error, 
+    isEnrolled, 
+    isLoading,
+    enroll, 
+    authenticate, 
+    reset 
+  } = useBioKey({
+    rpId: 'example.com',
+    rpName: 'My App',
+    serverUrl: 'https://api.example.com'
+  })
+
+  const userId = 'user@example.com'
+
+  return (
+    <div>
+      <h1>Login</h1>
+      
+      {error && <div style={{ color: 'red' }}>{error}</div>}
+      
+      {!isEnrolled ? (
+        <button onClick={() => enroll(userId)} disabled={isLoading}>
+          {isLoading ? 'Enrolling...' : 'Enable Biometric Login'}
+        </button>
+      ) : (
+        <>
+          <button onClick={() => authenticate(userId)} disabled={isLoading}>
+            {isLoading ? 'Authenticating...' : 'Login with Biometrics'}
+          </button>
+          <button onClick={reset}>Disable Biometric Login</button>
+        </>
+      )}
+      
+      <div>
+        Status: {status}
+        {identity && <div>Enrolled: {new Date(identity.enrolledAt).toLocaleDateString()}</div>}
+      </div>
+    </div>
+  )
+}
+```
+
+## Complete Example App
+
+Here's a full example with proper React patterns:
+
+```jsx
+import { useBioKey } from 'biokey-react'
+import { useState } from 'react'
+
+function App() {
+  const [userId, setUserId] = useState('')
+  const [isLoggedIn, setIsLoggedIn] = useState(false)
+
+  const { 
+    identity, 
+    status, 
+    error, 
+    isEnrolled, 
+    isLoading,
+    enroll, 
+    authenticate, 
+    reset 
+  } = useBioKey({
+    rpId: location.hostname,
+    rpName: 'BioKey Demo',
+    serverUrl: null // Offline mode
+  })
+
+  const handleEnroll = async () => {
+    try {
+      await enroll(userId)
+      alert('Biometric login enabled!')
+    } catch (err) {
+      // Error is already in the error state
+      console.error('Enrollment failed:', err)
+    }
+  }
+
+  const handleLogin = async () => {
+    try {
+      await authenticate(userId)
+      setIsLoggedIn(true)
+    } catch (err) {
+      console.error('Authentication failed:', err)
+    }
+  }
+
+  const handleLogout = () => {
+    setIsLoggedIn(false)
+  }
+
+  const handleDisable = () => {
+    if (confirm('Disable biometric login?')) {
+      reset()
+      setIsLoggedIn(false)
+    }
+  }
+
+  if (isLoggedIn) {
+    return (
+      <div className="app">
+        <h1>Welcome!</h1>
+        <p>You are logged in as: {userId}</p>
+        <p>Public Key: {identity?.publicKey?.slice(0, 16)}...</p>
+        <p>Method: {identity?.method}</p>
+        <button onClick={handleLogout}>Logout</button>
+        <button onClick={handleDisable} style={{ marginLeft: '10px' }}>
+          Disable Biometrics
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="app">
+      <h1>BioKey React Demo</h1>
+      
+      <input 
+        type="text" 
+        value={userId} 
+        onChange={(e) => setUserId(e.target.value)}
+        placeholder="Enter user ID"
+        disabled={isLoading}
+      />
+
+      {error && (
+        <div style={{ color: 'red', margin: '10px 0' }}>
+          Error: {error}
+        </div>
+      )}
+
+      {!isEnrolled ? (
+        <div>
+          <p>Biometric login is not enabled for this device.</p>
+          <button 
+            onClick={handleEnroll} 
+            disabled={!userId || isLoading}
+          >
+            {isLoading ? 'Enrolling...' : 'Enable Biometric Login'}
+          </button>
+        </div>
+      ) : (
+        <div>
+          <p>✓ Biometric login is enabled</p>
+          <p>Enrolled: {new Date(identity.enrolledAt).toLocaleString()}</p>
+          <button 
+            onClick={handleLogin} 
+            disabled={!userId || isLoading}
+          >
+            {isLoading ? 'Authenticating...' : 'Login with Biometrics'}
+          </button>
+        </div>
+      )}
+
+      <div style={{ marginTop: '20px', fontSize: '12px', color: '#666' }}>
+        Status: {status}
+      </div>
+    </div>
+  )
+}
+
+export default App
+```
+
+## Hook API Reference
+
+### `useBioKey(options)`
+
+React hook that provides biometric authentication functionality.
+
+**Parameters:**
+- `options` (object) - Configuration object passed to `BioKeyClient`
+  - `rpId` (string) - Your domain (defaults to `location.hostname`)
+  - `rpName` (string) - Display name for your app
+  - `serverUrl` (string | null) - Server endpoint or `null` for offline mode
+
+**Returns:**
+```javascript
+{
+  // State
+  identity: Identity | null,    // Current enrolled identity
+  status: string,               // 'idle' | 'enrolling' | 'enrolled' | 'authenticating' | 'authenticated' | 'error'
+  error: string | null,         // Error message if any
+  isEnrolled: boolean,          // Whether user has enrolled
+  isLoading: boolean,           // Whether an operation is in progress
+
+  // Methods
+  enroll: (userId?: string) => Promise<Identity>,
+  authenticate: (userId?: string) => Promise<{ verified: boolean, publicKey: string, method: string }>,
+  reset: () => void             // Clear identity and reset state
+}
+```
+
+## Advanced Patterns
+
+### Context Provider Pattern
+
+For app-wide authentication state:
+
+```jsx
+import { createContext, useContext } from 'react'
+import { useBioKey } from 'biokey-react'
+
+const AuthContext = createContext(null)
+
+export function AuthProvider({ children }) {
+  const biokey = useBioKey({
+    rpId: import.meta.env.VITE_RP_ID,
+    rpName: 'My App',
+    serverUrl: import.meta.env.VITE_SERVER_URL
+  })
+
+  return (
+    <AuthContext.Provider value={biokey}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext)
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider')
+  }
+  return context
+}
+```
+
+Usage:
+
+```jsx
+function App() {
+  return (
+    <AuthProvider>
+      <LoginPage />
+    </AuthProvider>
+  )
+}
+
+function LoginPage() {
+  const { isEnrolled, authenticate } = useAuth()
+  // ...
+}
+```
+
+### Protected Routes
+
+Combine with React Router:
+
+```jsx
+import { Navigate } from 'react-router-dom'
+import { useAuth } from './AuthProvider'
+
+function ProtectedRoute({ children }) {
+  const { status } = useAuth()
+
+  if (status !== 'authenticated') {
+    return <Navigate to="/login" replace />
+  }
+
+  return children
+}
+
+// In your router:
+<Route path="/dashboard" element={
+  <ProtectedRoute>
+    <Dashboard />
+  </ProtectedRoute>
+} />
+```
+
+### Auto-login on Mount
+
+Automatically attempt authentication when the component mounts:
+
+```jsx
+import { useEffect } from 'react'
+import { useBioKey } from 'biokey-react'
+
+function AutoLogin({ userId, onSuccess }) {
+  const { isEnrolled, authenticate, status } = useBioKey()
+
+  useEffect(() => {
+    if (isEnrolled && status === 'idle') {
+      authenticate(userId).then(onSuccess).catch(console.error)
+    }
+  }, [isEnrolled, userId])
+
+  return <div>Authenticating...</div>
+}
+```
+
+### Custom UI States
+
+Build custom components based on status:
+
+```jsx
+function BiometricButton({ userId, onAuthenticated }) {
+  const { status, error, isEnrolled, enroll, authenticate } = useBioKey()
+
+  const handleClick = async () => {
+    try {
+      if (!isEnrolled) {
+        await enroll(userId)
+      }
+      const result = await authenticate(userId)
+      onAuthenticated(result)
+    } catch (err) {
+      console.error(err)
+    }
+  }
+
+  const buttonText = {
+    idle: isEnrolled ? 'Login with Biometrics' : 'Enable Biometrics',
+    enrolling: 'Enrolling...',
+    authenticating: 'Authenticating...',
+    authenticated: '✓ Authenticated',
+    error: 'Try Again'
+  }[status] || 'Login'
+
+  return (
+    <div>
+      <button onClick={handleClick} disabled={status === 'enrolling' || status === 'authenticating'}>
+        {buttonText}
+      </button>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+    </div>
+  )
+}
+```
+
+## TypeScript Support
+
+The hook includes TypeScript definitions:
+
+```typescript
+import { useBioKey } from 'biokey-react'
+import type { Identity } from 'biokey-js'
+
+interface Props {
+  userId: string
+}
+
+const LoginComponent: React.FC<Props> = ({ userId }) => {
+  const { 
+    identity, 
+    status, 
+    error, 
+    enroll, 
+    authenticate 
+  } = useBioKey({
+    rpId: 'example.com',
+    rpName: 'My App',
+    serverUrl: null
+  })
+
+  // TypeScript knows the types!
+  const handleEnroll = async () => {
+    const result: Identity = await enroll(userId)
+    console.log(result.publicKey) // string
+  }
+
+  return <div>...</div>
+}
+```
+
+## Error Handling
+
+The hook automatically updates the `error` state when operations fail:
+
+```jsx
+const { error, status, enroll } = useBioKey()
+
+// Display errors in UI
+{error && <ErrorMessage>{error}</ErrorMessage>}
+
+// Status provides context
+{status === 'error' && <Retry onClick={() => enroll(userId)} />}
+```
+
+## Best Practices
+
+1. **Single instance** - Use the hook at the appropriate level in your component tree. For app-wide auth, use a Context Provider.
+
+2. **User feedback** - Always show loading states using `isLoading` and error messages from the `error` state.
+
+3. **Graceful fallback** - Provide alternative authentication methods if biometric auth fails.
+
+4. **Clear CTAs** - Use different button text for enrollment vs authentication.
+
+5. **Persist user ID** - Store the user ID separately so users don't need to re-enter it.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Browser SDK" icon="js" href="/guides/browser-sdk">
+    Learn about the underlying JavaScript SDK
+  </Card>
+  <Card title="Server Setup" icon="server" href="/guides/server-setup">
+    Set up the server for multi-device sync
+  </Card>
+  <Card title="Offline Mode" icon="wifi" href="/guides/offline-mode">
+    Build without a backend server
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/biokey-react/use-biokey">
+    Full React API documentation
+  </Card>
+</CardGroup>

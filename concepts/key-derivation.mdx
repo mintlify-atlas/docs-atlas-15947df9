@@ -1,0 +1,435 @@
+---
+title: Key Derivation
+description: Deep dive into BioKey's cryptographic derivation methods
+---
+
+BioKey derives a deterministic 256-bit Identity Key from biometric authentication using one of two methods: WebAuthn PRF extension (V2) or rawId-HKDF (V1).
+
+## Why Key Derivation?
+
+Traditional biometric systems work like this:
+
+```
+Biometric → Unlocks → Pre-generated key (stored on device or in cloud)
+```
+
+BioKey inverts this model:
+
+```
+Biometric → Derives → Cryptographic identity (deterministic, reproducible)
+```
+
+**Benefits:**
+- No key storage in vendor clouds (iCloud, Google)
+- Same biometric on different devices can derive different keys (device-specific)
+- Identity tied to biological authentication, not device possession
+- Server stores only public keys, never secrets
+
+## V2: WebAuthn PRF Extension (Preferred)
+
+The **Pseudo-Random Function (PRF)** extension is part of the WebAuthn Level 3 specification. It allows a platform authenticator to produce a deterministic, hardware-backed secret output tied to a passkey.
+
+### How PRF Works
+
+```
+Platform Authenticator (secure enclave)
+  |
+  ├─ Biometric verification (fingerprint, Face ID)
+  ├─ Credential private key (stored in secure element)
+  ├─ PRF salt input: "biokey-prf-v2-salt"
+  └─ PRF function (hardware-backed cryptographic operation)
+      └─ Output: 32 bytes (256 bits) deterministic secret
+```
+
+**Key properties:**
+- **Deterministic**: Same credential + same salt → same output
+- **Hardware-backed**: Computed inside secure enclave, never exposed
+- **Secret**: Unlike `rawId`, the PRF output is cryptographically secret
+- **Stable**: Survives OS updates, device reboots
+
+### PRF During Enrollment
+
+When creating a credential, pass the PRF extension with a fixed salt:
+
+```js
+const credential = await navigator.credentials.create({
+  publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: { name: 'BioKey', id: 'example.com' },
+    user: {
+      id: crypto.getRandomValues(new Uint8Array(16)),
+      name: 'biokey-user',
+      displayName: 'BioKey User'
+    },
+    pubKeyCredParams: [
+      { alg: -7, type: 'public-key' },   // ES256
+      { alg: -257, type: 'public-key' }  // RS256
+    ],
+    authenticatorSelection: {
+      authenticatorAttachment: 'platform',
+      userVerification: 'required',
+      residentKey: 'preferred'
+    },
+    extensions: {
+      prf: {
+        eval: {
+          first: new TextEncoder().encode('biokey-prf-v2-salt')
+        }
+      }
+    },
+    timeout: 60000
+  }
+})
+```
+
+**Extract the PRF output:**
+
+```js
+const prfResults = credential.getClientExtensionResults()?.prf?.results
+
+if (prfResults?.first) {
+  const identityKey = new Uint8Array(prfResults.first)
+  const publicKey = bufToHex(identityKey) // 64-char hex string
+  console.log('Identity Key:', publicKey)
+  // method = 'prf'
+}
+```
+
+### PRF During Authentication
+
+When authenticating, use `evalByCredential` to specify which credential should compute the PRF:
+
+```js
+const assertion = await navigator.credentials.get({
+  publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rpId: 'example.com',
+    allowCredentials: [{
+      id: hexToBuf(credentialId),
+      type: 'public-key'
+    }],
+    userVerification: 'required',
+    extensions: {
+      prf: {
+        evalByCredential: {
+          [credentialId]: {
+            first: new TextEncoder().encode('biokey-prf-v2-salt')
+          }
+        }
+      }
+    },
+    timeout: 60000
+  }
+})
+
+const prfOutput = assertion.getClientExtensionResults()?.prf?.results?.first
+const derivedKey = bufToHex(new Uint8Array(prfOutput))
+
+// CRITICAL: Verify against stored public key
+if (derivedKey !== storedIdentity.publicKey) {
+  throw new Error('PRF key mismatch — identity verification failed')
+}
+```
+
+### PRF Salt Specification
+
+| Parameter | Value |
+|-----------|-------|
+| Salt string | `"biokey-prf-v2-salt"` |
+| Encoding | UTF-8 bytes |
+| Length | 20 bytes |
+| Version lock | Changing salt produces different Identity Key |
+
+<Warning>
+**Do not modify the PRF salt**. The salt is version-locked in the protocol specification. Changing it will produce a completely different Identity Key, breaking existing enrollments.
+</Warning>
+
+### Platform Support for PRF
+
+As of 2025:
+
+| Platform | Browser | Support | Notes |
+|----------|---------|---------|-------|
+| Android | Chrome | ✅ Excellent | Recommended for production |
+| macOS | Safari 18+ | ✅ Good | Improving with each release |
+| iOS | Safari 18+ | ✅ Good | Requires iOS 18+ |
+| Windows | Edge | ⚠️ Limited | Check `PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()` |
+| Linux | Firefox | ❌ Not yet | Falls back to V1 |
+
+**Check PRF availability:**
+
+```js
+function isPRFSupported(credential) {
+  return !!(
+    credential?.getClientExtensionResults?.()?.prf?.enabled ||
+    credential?.getClientExtensionResults?.()?.prf?.results?.first
+  )
+}
+```
+
+## V1: rawId + HKDF (Fallback)
+
+For platforms that don't support PRF, BioKey falls back to deriving a key from the credential's `rawId` using **HKDF (HMAC-based Key Derivation Function)** as defined in [RFC 5869](https://datatracker.ietf.org/doc/html/rfc5869).
+
+### What is rawId?
+
+When WebAuthn creates a credential, it returns a unique identifier called `rawId`:
+
+```js
+const credential = await navigator.credentials.create({...})
+
+// rawId is an ArrayBuffer, typically 16-64 bytes
+console.log(credential.rawId) // ArrayBuffer(32) { ... }
+```
+
+**Important characteristics:**
+- **Not secret**: The `rawId` is a *credential identifier*, not a cryptographic secret
+- **Observable**: It's transmitted to the server during enrollment and authentication
+- **Stable**: Remains constant for the lifetime of the credential
+- **Device-specific**: Different devices generate different `rawId` values for the same biometric
+
+<Warning>
+**Security consideration**: Because `rawId` is an identifier (not a secret), V1 derivation provides identity stability but not the same cryptographic guarantees as V2 PRF. An attacker observing the `rawId` could potentially derive the same Identity Key if they gain access to the protocol parameters.
+</Warning>
+
+### HKDF Algorithm
+
+HKDF expands pseudo-random keying material into a cryptographically strong key:
+
+```
+Input Keying Material (IKM): credential.rawId
+     ↓
+  HKDF-Extract (with salt)
+     ↓
+Pseudo-Random Key (PRK)
+     ↓
+  HKDF-Expand (with info + length)
+     ↓
+Output Key Material (OKM): 256-bit Identity Key
+```
+
+### HKDF Parameters
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| **Hash** | SHA-256 | HMAC hash function |
+| **IKM** | `credential.rawId` | Input keying material (raw bytes) |
+| **Salt** | `"biokey-v1-salt"` | UTF-8 encoded, prevents rainbow tables |
+| **Info** | `"biokey-identity-seed"` | UTF-8 encoded, application context |
+| **L** | 256 bits (32 bytes) | Output length |
+
+### Implementation
+
+BioKey uses the Web Crypto API's `HKDF` implementation:
+
+```js
+// From packages/biokey-core/src/derive.js
+export async function deriveKey(rawId) {
+  // Step 1: Import rawId as key material
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    rawId,
+    { name: 'HKDF' },
+    false,
+    ['deriveBits']
+  )
+
+  // Step 2: Derive 256 bits using HKDF-SHA256
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new TextEncoder().encode('biokey-v1-salt'),
+      info: new TextEncoder().encode('biokey-identity-seed')
+    },
+    keyMaterial,
+    256
+  )
+
+  return new Uint8Array(bits)
+}
+```
+
+**Usage:**
+
+```js
+const credential = await navigator.credentials.create({...})
+const identityKey = await deriveKey(credential.rawId)
+const publicKey = bufToHex(identityKey) // 64-char hex string
+```
+
+### Why These Salt and Info Values?
+
+**Salt: `"biokey-v1-salt"`**
+- Prevents rainbow table attacks
+- Version-locks the derivation (changing salt = different output)
+- Namespaced to BioKey protocol v1
+
+**Info: `"biokey-identity-seed"`**
+- Binds the output to a specific application context
+- Prevents key confusion between different uses of the same `rawId`
+- Allows future protocol extensions with different info strings
+
+<Note>
+**Protocol versioning**: The V1 salt and info strings are frozen in the specification. Changing them would break compatibility with existing enrollments. Future versions (V3+) may introduce new derivation paths with different parameters.
+</Note>
+
+## Automatic Method Selection
+
+BioKey automatically attempts V2 (PRF) first and falls back to V1 (HKDF) if PRF is unsupported:
+
+```js
+// From packages/biokey-core/src/enroll.js
+export async function enroll(rpId, rpName = 'BioKey') {
+  const credential = await navigator.credentials.create({
+    publicKey: {
+      // ... options ...
+      extensions: {
+        prf: { eval: { first: PRF_SALT } }
+      }
+    }
+  })
+
+  const prfOutput = extractPRFOutput(credential)
+  let publicKey, method
+
+  if (prfOutput) {
+    // V2: PRF path — hardware-backed secret
+    publicKey = bufToHex(prfOutput)
+    method = 'prf'
+  } else {
+    // V1: rawId-HKDF fallback
+    const seed = await deriveKey(credential.rawId)
+    publicKey = bufToHex(seed)
+    method = 'rawid'
+  }
+
+  return { publicKey, credentialId: bufToHex(credential.rawId), enrolledAt: Date.now(), method }
+}
+```
+
+The `method` field is stored with the identity so authentication uses the same derivation path.
+
+## Key Verification During Authentication
+
+After re-deriving the Identity Key during authentication, the client MUST verify it matches the stored public key:
+
+```js
+// From packages/biokey-core/src/authenticate.js
+const prfOutput = extractPRFOutput(assertion)
+
+if (prfOutput) {
+  const derivedKey = bufToHex(prfOutput)
+  if (identity.method === 'prf' && derivedKey !== identity.publicKey) {
+    throw new Error('PRF key mismatch — identity verification failed.')
+  }
+  return { verified: true, publicKey: derivedKey, method: 'prf' }
+}
+
+// V1 fallback
+const seed = await deriveKey(assertion.rawId)
+const derivedKey = bufToHex(seed)
+
+if (identity.method === 'rawid' && derivedKey !== identity.publicKey) {
+  throw new Error('Key mismatch — identity verification failed.')
+}
+
+return { verified: true, publicKey: identity.publicKey, method: 'rawid' }
+```
+
+<Warning>
+**Critical security check**: This verification prevents:
+- Man-in-the-middle attacks
+- Credential substitution
+- Biometric spoofing attempts
+- Protocol downgrade attacks
+
+Never skip this verification step.
+</Warning>
+
+## Identity Key Format
+
+Regardless of derivation method, the Identity Key is always:
+
+- **Length**: 256 bits (32 bytes)
+- **Encoding**: Hex string (64 lowercase characters)
+- **Alphabet**: `0-9a-f`
+- **Example**: `a3f1c29e8d7b4f2c1e9a6b8d4f7c2e1a9b6d3f8c4e7a2d9f1c8b5e3a7d2f9c4e1b`
+
+**Utility functions:**
+
+```js
+// Buffer to hex
+function bufToHex(buf) {
+  return [...new Uint8Array(buf)]
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+// Hex to buffer
+function hexToBuf(hex) {
+  return new Uint8Array(
+    hex.match(/.{2}/g).map(b => parseInt(b, 16))
+  ).buffer
+}
+```
+
+## Cross-Device Considerations
+
+### Same Biometric, Different Devices
+
+Each device generates a **different credential and Identity Key** for the same biometric:
+
+```
+Device A (iPhone):
+  Fingerprint → credentialId_A → Identity Key A
+
+Device B (Android):
+  Same fingerprint → credentialId_B → Identity Key B
+
+  Identity Key A ≠ Identity Key B
+```
+
+This is intentional:
+- **Security**: Device compromise doesn't expose identity on other devices
+- **Privacy**: Prevents cross-device fingerprinting
+- **Flexibility**: User can enroll multiple devices to one account
+
+### Server-Side Linking
+
+Servers can link multiple Identity Keys to one user account:
+
+```js
+// Database schema
+{
+  userId: 'user-123',
+  identities: [
+    { publicKey: 'a3f1c...', deviceId: 'iphone-15', method: 'prf' },
+    { publicKey: '7b8d4...', deviceId: 'pixel-8', method: 'rawid' }
+  ]
+}
+```
+
+## Cryptographic Properties
+
+Both V2 and V1 produce Identity Keys with these properties:
+
+| Property | V2 (PRF) | V1 (HKDF) |
+|----------|----------|----------|
+| **Deterministic** | ✅ Yes | ✅ Yes |
+| **Entropy** | 256 bits | 256 bits |
+| **Hardware-backed** | ✅ Yes | ❌ No (Web Crypto API) |
+| **Secret output** | ✅ Yes | ⚠️ Derived from observable `rawId` |
+| **Collision resistance** | ✅ High | ✅ High (SHA-256) |
+| **Rainbow table attack** | ✅ Immune | ✅ Immune (salted HKDF) |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Security Model" icon="shield" href="/concepts/security-model">
+    Understand threat models and security boundaries
+  </Card>
+  <Card title="Protocol Specification" icon="file-lines" href="/concepts/protocol-specification">
+    Full technical specification of the BioKey protocol
+  </Card>
+</CardGroup>

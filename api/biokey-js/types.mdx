@@ -1,0 +1,296 @@
+---
+title: 'Types'
+description: 'Type definitions for BioKeyClient methods and data structures'
+---
+
+## Identity
+
+Represents a stored biometric identity. This object is returned by `enroll()` and `getIdentity()`.
+
+```typescript
+interface Identity {
+  publicKey: string
+  credentialId: string
+  deviceId: string
+  enrolledAt: number
+  method: 'prf' | 'rawid'
+}
+```
+
+### Fields
+
+<ResponseField name="publicKey" type="string" required>
+  Hex-encoded 256-bit (64 character) cryptographic public key.
+  
+  This key is deterministically derived from the biometric credential and serves as the user's identity. It can be used for:
+  - Generating authentication tokens
+  - Encrypting/decrypting user data
+  - Verifying identity across sessions
+  
+  The same biometric will always produce the same public key.
+</ResponseField>
+
+<ResponseField name="credentialId" type="string" required>
+  Hex-encoded WebAuthn credential ID (rawId).
+  
+  This unique identifier represents the specific biometric credential created during enrollment. It is required for authentication and is used in the WebAuthn `allowCredentials` parameter.
+  
+  Length varies by authenticator but typically 32-64 bytes (64-128 hex characters).
+</ResponseField>
+
+<ResponseField name="deviceId" type="string" required>
+  16-character device fingerprint.
+  
+  A deterministic identifier derived from browser and system characteristics:
+  - User agent string
+  - Language preference
+  - Screen dimensions
+  - Timezone
+  
+  Used to detect credential usage across different devices. Note that this is a lightweight fingerprint and may change if browser/system settings are modified.
+</ResponseField>
+
+<ResponseField name="enrolledAt" type="number" required>
+  Unix timestamp in milliseconds when enrollment occurred.
+  
+  Example: `1709856234567` represents March 7, 2024 at 10:43:54.567 PM UTC
+  
+  ```javascript
+  const enrollDate = new Date(identity.enrolledAt)
+  console.log(enrollDate.toLocaleString())
+  ```
+</ResponseField>
+
+<ResponseField name="method" type="'prf' | 'rawid'" required>
+  Key derivation method used during enrollment.
+  
+  - **`'prf'`** (Preferred): Uses the WebAuthn PRF (Pseudo-Random Function) extension. Provides stronger security guarantees and is the modern standard.
+  - **`'rawid'`** (Fallback): Uses HKDF key derivation from the credential's rawId. Used when the platform authenticator doesn't support PRF.
+  
+  The same method will be used during authentication to re-derive the public key.
+</ResponseField>
+
+### Example
+
+```javascript
+const identity = client.getIdentity()
+if (identity) {
+  console.log({
+    publicKey: identity.publicKey,        // "a3f5e8d2c4b1..."
+    credentialId: identity.credentialId,  // "9b2c4f1a8e3d..."
+    deviceId: identity.deviceId,          // "7e3a9c2f1b4d"
+    enrolledAt: identity.enrolledAt,      // 1709856234567
+    method: identity.method               // "prf"
+  })
+}
+```
+
+---
+
+## AuthenticationResult
+
+Returned by the `authenticate()` method upon successful authentication.
+
+```typescript
+interface AuthenticationResult {
+  verified: boolean
+  publicKey: string
+  method: 'prf' | 'rawid'
+}
+```
+
+### Fields
+
+<ResponseField name="verified" type="boolean" required>
+  Authentication verification status.
+  
+  Always `true` when the method returns successfully. If authentication fails, the method throws an error instead of returning `false`.
+</ResponseField>
+
+<ResponseField name="publicKey" type="string" required>
+  Hex-encoded public key re-derived from the biometric credential.
+  
+  This should match the `publicKey` stored during enrollment. Use this key to:
+  - Generate session tokens
+  - Verify the user's identity
+  - Decrypt user-specific data
+</ResponseField>
+
+<ResponseField name="method" type="'prf' | 'rawid'" required>
+  Key derivation method used during this authentication.
+  
+  Should match the `method` field from the stored Identity object. Indicates whether PRF or rawId-HKDF was used to re-derive the public key.
+</ResponseField>
+
+### Example
+
+```javascript
+try {
+  const result = await client.authenticate('user-123')
+  
+  if (result.verified) {
+    // Create session token using the public key
+    const sessionToken = await createToken(result.publicKey)
+    
+    console.log('Authentication successful')
+    console.log('Method used:', result.method)
+  }
+} catch (error) {
+  console.error('Authentication failed:', error.message)
+}
+```
+
+---
+
+## Constructor Options
+
+Configuration options for creating a new `BioKeyClient` instance.
+
+```typescript
+interface BioKeyClientOptions {
+  rpId?: string
+  rpName?: string
+  serverUrl?: string | null
+}
+```
+
+### Fields
+
+<ResponseField name="rpId" type="string" default="location.hostname">
+  Relying Party identifier (domain name).
+  
+  Must be a valid domain that matches or is a registrable suffix of the current page's origin. Examples:
+  - `"example.com"` - root domain
+  - `"auth.example.com"` - subdomain
+  - `"localhost"` - local development
+  
+  Credentials are bound to this domain and cannot be used with different domains.
+</ResponseField>
+
+<ResponseField name="rpName" type="string" default="'BioKey'">
+  Human-readable application name.
+  
+  Displayed to users during biometric prompts. Should clearly identify your application. Examples:
+  - `"My Application"`
+  - `"Acme Corp Portal"`
+  - `"SecureAuth"`
+</ResponseField>
+
+<ResponseField name="serverUrl" type="string | null" default="null">
+  Optional backend API base URL.
+  
+  When provided, enables server-backed authentication with these endpoints:
+  - `POST {serverUrl}/enroll` - Register credentials
+  - `GET {serverUrl}/challenge` - Fetch authentication challenges
+  - `POST {serverUrl}/verify` - Verify authentication results
+  
+  Set to `null` for client-only authentication without a backend.
+</ResponseField>
+
+### Example
+
+```javascript
+// Minimal configuration
+const client = new BioKeyClient()
+
+// Custom domain and name
+const client = new BioKeyClient({
+  rpId: 'myapp.com',
+  rpName: 'My Application'
+})
+
+// With server backend
+const client = new BioKeyClient({
+  rpId: 'myapp.com',
+  rpName: 'My Application',
+  serverUrl: 'https://api.myapp.com/auth'
+})
+```
+
+---
+
+## Error Types
+
+BioKeyClient methods throw standard JavaScript `Error` objects with descriptive messages.
+
+### Common Error Messages
+
+<ResponseField name="No enrolled credential" type="Error">
+  **Thrown by**: `authenticate()`
+  
+  **Cause**: Called `authenticate()` before `enroll()`, or identity was cleared.
+  
+  **Solution**: Check `getIdentity()` before authenticating, or prompt user to enroll.
+  
+  ```javascript
+  if (!client.getIdentity()) {
+    await client.enroll(userId)
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="PRF key mismatch — identity verification failed" type="Error">
+  **Thrown by**: `authenticate()`
+  
+  **Cause**: Re-derived PRF key doesn't match stored public key. May indicate:
+  - Tampering with stored identity
+  - Corrupted localStorage data
+  - Different biometric used
+  
+  **Solution**: Clear identity and re-enroll.
+  
+  ```javascript
+  client.clearIdentity()
+  await client.enroll(userId)
+  ```
+</ResponseField>
+
+<ResponseField name="Key mismatch — identity verification failed" type="Error">
+  **Thrown by**: `authenticate()`
+  
+  **Cause**: Re-derived rawId-HKDF key doesn't match stored public key (V1 fallback method).
+  
+  **Solution**: Same as PRF key mismatch - clear and re-enroll.
+</ResponseField>
+
+<ResponseField name="Server verification failed" type="Error">
+  **Thrown by**: `authenticate()` via `_serverVerify()`
+  
+  **Cause**: Backend server returned `verified: false`. Reasons may include:
+  - Expired challenge
+  - User not registered on server
+  - Invalid signature
+  
+  **Solution**: Check server logs and ensure user is properly enrolled.
+</ResponseField>
+
+<ResponseField name="Server public key mismatch" type="Error">
+  **Thrown by**: `authenticate()` via `_serverVerify()`
+  
+  **Cause**: Public key returned by server doesn't match client's expected key.
+  
+  **Solution**: Indicates desynchronization between client and server. Re-enroll to sync.
+</ResponseField>
+
+### WebAuthn Errors
+
+The browser may also throw WebAuthn-specific errors:
+
+- **`NotAllowedError`**: User cancelled the biometric prompt
+- **`NotSupportedError`**: WebAuthn not supported by browser
+- **`SecurityError`**: Operation not allowed (wrong domain, insecure context)
+- **`InvalidStateError`**: Credential already exists (during enrollment)
+
+```javascript
+try {
+  await client.authenticate(userId)
+} catch (error) {
+  if (error.name === 'NotAllowedError') {
+    console.log('User cancelled authentication')
+  } else if (error.name === 'NotSupportedError') {
+    console.log('WebAuthn not supported')
+  } else {
+    console.error('Authentication error:', error.message)
+  }
+}
+```

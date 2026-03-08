@@ -1,0 +1,124 @@
+---
+title: 'Database'
+description: 'Database schema and operations for BioKey Server'
+---
+
+BioKey Server uses SQLite via Bun's built-in `bun:sqlite` module to store user identities and challenges.
+
+## Database File
+
+The database is stored in `biokey.db` in the server's working directory. It is created automatically on first run.
+
+## Schema
+
+### identities Table
+
+Stores enrolled user identities with their biometric public keys.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Auto-incrementing primary key |
+| `user_id` | TEXT | Unique user identifier (UNIQUE constraint) |
+| `public_key` | TEXT | 64-character hex-encoded public key |
+| `device_id` | TEXT | Device identifier |
+| `method` | TEXT | Biometric method (default: 'rawid') |
+| `created_at` | INTEGER | Unix timestamp in milliseconds |
+
+### challenges Table
+
+Stores active authentication challenges with expiration tracking.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Auto-incrementing primary key |
+| `challenge` | TEXT | 64-character hex challenge (UNIQUE constraint) |
+| `created_at` | INTEGER | Unix timestamp in milliseconds |
+
+Challenges are automatically deleted after consumption or when they expire (5 minutes).
+
+## Database Operations
+
+The database layer is implemented in `packages/biokey-server/src/db.js:1` and exports the following functions:
+
+### saveIdentity(userId, publicKey, deviceId, method)
+
+Saves or updates a user identity. Uses `INSERT OR REPLACE` to allow re-enrollment.
+
+**Parameters:**
+- `userId` (string): User identifier
+- `publicKey` (string): 64-character hex public key
+- `deviceId` (string): Device identifier
+- `method` (string): Biometric method (default: 'rawid')
+
+**Implementation:** `packages/biokey-server/src/db.js:24`
+
+### getIdentity(userId)
+
+Retrieves an identity by user ID.
+
+**Parameters:**
+- `userId` (string): User identifier
+
+**Returns:** Identity row object or `undefined` if not found
+
+**Implementation:** `packages/biokey-server/src/db.js:32`
+
+### getIdentityByPublicKey(publicKey)
+
+Retrieves an identity by public key.
+
+**Parameters:**
+- `publicKey` (string): Public key to search for
+
+**Returns:** Identity row object or `undefined` if not found
+
+**Implementation:** `packages/biokey-server/src/db.js:36`
+
+### saveChallenge(challenge)
+
+Stores a new challenge in the database.
+
+**Parameters:**
+- `challenge` (string): 64-character hex challenge
+
+**Implementation:** `packages/biokey-server/src/db.js:40`
+
+### consumeChallenge(challenge)
+
+Validates and consumes a challenge. Challenges are single-use and expire after 5 minutes.
+
+**Parameters:**
+- `challenge` (string): Challenge to validate
+
+**Returns:** `true` if valid and not expired, `false` otherwise
+
+**Behavior:**
+- Looks up the challenge in the database
+- Returns `false` if challenge not found
+- Deletes the challenge from the database (single-use)
+- Checks if the challenge is less than 5 minutes old
+- Returns `true` only if found and not expired
+
+**Implementation:** `packages/biokey-server/src/db.js:47`
+
+### cleanOldChallenges()
+
+Deletes all challenges older than 5 minutes. Called automatically on each `GET /challenge` request.
+
+**Implementation:** `packages/biokey-server/src/db.js:55`
+
+## Data Persistence
+
+The SQLite database file persists all data on disk. For production deployments:
+
+- **Railway**: Mount a persistent volume to preserve `biokey.db` across deployments
+- **Docker**: Mount a volume to `/app/biokey.db` or set a working directory with persistent storage
+- **Backup**: The database file can be backed up by copying `biokey.db` while the server is stopped
+
+## Security Considerations
+
+- Public keys are stored as plain text (they are public by design)
+- User IDs have a UNIQUE constraint to prevent duplicate enrollments
+- Challenges use cryptographically secure random generation (`crypto.getRandomValues`)
+- Challenges are automatically cleaned up to prevent database bloat
+- No sensitive biometric data (templates, raw images) is stored on the server

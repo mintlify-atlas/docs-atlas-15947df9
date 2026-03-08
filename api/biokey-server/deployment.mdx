@@ -1,0 +1,225 @@
+---
+title: 'Deployment'
+description: 'Deploy BioKey Server to production environments'
+---
+
+BioKey Server is built with Bun and Hono, making it lightweight and easy to deploy to various platforms.
+
+## Environment Variables
+
+The server supports the following environment variables:
+
+<ParamField path="PORT" type="number" default="3000">
+  Port number for the HTTP server to listen on
+</ParamField>
+
+## Railway Deployment
+
+BioKey Server includes a `railway.json` configuration file for seamless deployment to [Railway](https://railway.app).
+
+### Configuration
+
+The `railway.json` file at `packages/biokey-server/railway.json:1` specifies:
+
+```json
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "bun src/index.js",
+    "restartPolicyType": "ON_FAILURE"
+  }
+}
+```
+
+### Deploy Steps
+
+1. **Install Railway CLI**
+   ```bash
+   npm install -g @railway/cli
+   ```
+
+2. **Login to Railway**
+   ```bash
+   railway login
+   ```
+
+3. **Initialize Project**
+   ```bash
+   cd packages/biokey-server
+   railway init
+   ```
+
+4. **Deploy**
+   ```bash
+   railway up
+   ```
+
+5. **Add Domain (Optional)**
+   ```bash
+   railway domain
+   ```
+
+### Persistent Storage
+
+Railway deployments are ephemeral by default. To persist the SQLite database:
+
+1. Go to your Railway project dashboard
+2. Add a volume to your service
+3. Mount it to the application directory where `biokey.db` is created
+4. Set the volume mount path to `/app` or configure `DB_PATH` if you add that environment variable
+
+## Docker Deployment
+
+While the repository doesn't include a Dockerfile, you can create one:
+
+```dockerfile
+FROM oven/bun:1
+
+WORKDIR /app
+
+COPY package.json .
+RUN bun install --production
+
+COPY src ./src
+
+EXPOSE 3000
+
+CMD ["bun", "src/index.js"]
+```
+
+### Build and Run
+
+```bash
+# Build image
+docker build -t biokey-server .
+
+# Run container
+docker run -p 3000:3000 -v biokey-data:/app biokey-server
+```
+
+### Docker Compose
+
+```yaml
+version: '3.8'
+services:
+  biokey-server:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - biokey-data:/app
+    environment:
+      - PORT=3000
+    restart: unless-stopped
+
+volumes:
+  biokey-data:
+```
+
+## Manual Deployment
+
+### Requirements
+
+- [Bun](https://bun.sh) v1.0 or later
+- Linux, macOS, or Windows with WSL
+
+### Steps
+
+1. **Install Dependencies**
+   ```bash
+   cd packages/biokey-server
+   bun install
+   ```
+
+2. **Set Environment Variables**
+   ```bash
+   export PORT=3000
+   ```
+
+3. **Run Server**
+   ```bash
+   bun src/index.js
+   ```
+
+### Production Mode
+
+For production, use a process manager like PM2:
+
+```bash
+# Install PM2
+npm install -g pm2
+
+# Start with PM2
+pm2 start "bun src/index.js" --name biokey-server
+
+# Enable startup on boot
+pm2 startup
+pm2 save
+```
+
+## Vercel/Netlify Deployment
+
+BioKey Server uses Hono, which supports serverless deployment:
+
+1. Install the appropriate adapter:
+   ```bash
+   bun add @hono/node-server  # or other adapter
+   ```
+
+2. Create a serverless entry point following the platform's requirements
+
+3. Note: SQLite database may not persist in serverless environments. Consider using a hosted database service.
+
+## Health Check
+
+The server exposes a health check endpoint:
+
+```bash
+curl https://your-server.com/
+```
+
+Response:
+```json
+{
+  "name": "biokey-server",
+  "version": "0.1.0"
+}
+```
+
+## CORS Configuration
+
+The server enables CORS for all origins by default (implemented in `packages/biokey-server/src/index.js:9`).
+
+For production, consider restricting CORS:
+
+```javascript
+import { cors } from 'hono/cors'
+
+app.use('*', cors({
+  origin: ['https://your-app.com'],
+  allowMethods: ['GET', 'POST'],
+}))
+```
+
+## Security Checklist
+
+- [ ] Use HTTPS in production (Railway provides this automatically)
+- [ ] Configure CORS to allow only trusted origins
+- [ ] Set up rate limiting to prevent abuse
+- [ ] Monitor database size and implement cleanup policies
+- [ ] Regularly backup the SQLite database file
+- [ ] Consider using a managed database service for high-traffic applications
+- [ ] Set up logging and monitoring (Railway provides built-in logs)
+
+## Scaling Considerations
+
+For high-traffic deployments:
+
+- SQLite is suitable for moderate loads (thousands of requests per second)
+- For larger scale, consider migrating to PostgreSQL or MySQL
+- Run multiple server instances behind a load balancer
+- Implement Redis or another cache for challenge storage
+- Monitor database file size and implement archival strategies

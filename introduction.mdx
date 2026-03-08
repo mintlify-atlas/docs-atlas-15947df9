@@ -1,0 +1,149 @@
+---
+title: "Introduction"
+description: "Your fingerprint. Your identity. No middleman."
+---
+
+## What is BioKey?
+
+BioKey is an open-source biometric authentication protocol that transforms your fingerprint into a cryptographic identity. Unlike traditional passkey systems that store credentials in vendor clouds (iCloud, Google Password Manager), BioKey derives your identity directly from your biometric authentication — giving you true ownership without any middleman.
+
+<CardGroup cols={2}>
+  <Card title="Zero Server Storage" icon="shield-check">
+    No biometric data ever leaves your device. The server stores only public keys.
+  </Card>
+  <Card title="Vendor Independent" icon="unlock">
+    No lock-in to Apple, Google, or Microsoft. You own your identity.
+  </Card>
+  <Card title="WebAuthn PRF" icon="key">
+    Uses hardware-backed PRF extension with HKDF fallback for maximum compatibility.
+  </Card>
+  <Card title="Open Protocol" icon="book-open">
+    CC0-licensed specification that anyone can implement or build upon.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+BioKey uses two key derivation methods, automatically selecting the best available:
+
+**V2 — PRF (Preferred)**
+```
+Fingerprint scan
+  → WebAuthn PRF extension
+    → 256-bit hardware secret (never leaves authenticator)
+      → Your cryptographic identity
+```
+
+**V1 — HKDF (Fallback)**
+```
+Fingerprint scan
+  → WebAuthn credential (rawId)
+    → HKDF-SHA256 derivation
+      → Your cryptographic identity
+```
+
+The library attempts V2 (PRF) first for hardware-backed security, falling back to V1 on platforms without PRF support. Your identity is deterministic and recoverable from your biometric on any compatible device.
+
+## Key Features
+
+<AccordionGroup>
+  <Accordion title="Passwordless Authentication">
+    No passwords to remember, no credentials to store. Your fingerprint is your password.
+  </Accordion>
+  <Accordion title="Cross-Platform Support">
+    Works on any device with a platform authenticator (fingerprint sensor, Face ID, Windows Hello).
+  </Accordion>
+  <Accordion title="Multi-Package Ecosystem">
+    Core library, browser SDK, React hooks, and auth server — use what you need.
+  </Accordion>
+  <Accordion title="Offline Capable">
+    Supports local-only authentication without a server for device unlock scenarios.
+  </Accordion>
+  <Accordion title="Open Standard">
+    Complete protocol specification (CC0 licensed) for interoperable implementations.
+  </Accordion>
+</AccordionGroup>
+
+## Quick Example
+
+<CodeGroup>
+
+```javascript Browser SDK
+import { BioKeyClient } from 'biokey-js'
+
+const biokey = new BioKeyClient({ 
+  serverUrl: 'https://your-server.com' 
+})
+
+// Enroll a new user
+const identity = await biokey.enroll('user-123')
+
+// Authenticate
+const result = await biokey.authenticate('user-123')
+console.log(result.verified) // true
+```
+
+```jsx React Hook
+import { useBioKey } from 'biokey-react'
+
+function AuthButton() {
+  const { isEnrolled, enroll, authenticate, status } = useBioKey()
+
+  return (
+    <button onClick={() => isEnrolled ? authenticate() : enroll()}>
+      {isEnrolled ? 'Authenticate' : 'Enroll'} with Fingerprint
+    </button>
+  )
+}
+```
+
+```javascript Core Library
+import { BioKey } from 'biokey-core'
+
+const biokey = new BioKey({
+  rpId: 'example.com',
+  rpName: 'My App'
+})
+
+// Enroll and authenticate locally
+const identity = await biokey.enroll()
+const result = await biokey.authenticate(identity)
+```
+
+</CodeGroup>
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with BioKey in 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install BioKey packages for your platform
+  </Card>
+  <Card title="How It Works" icon="gear" href="/concepts/how-it-works">
+    Deep dive into the key derivation mechanism
+  </Card>
+  <Card title="Protocol Spec" icon="file-lines" href="/concepts/protocol-specification">
+    Read the complete open protocol specification
+  </Card>
+</CardGroup>
+
+## Why BioKey?
+
+Traditional authentication systems force you to choose between security and convenience. Passwords are inconvenient and weak. Passkeys are convenient but lock you into vendor ecosystems. BioKey provides both security and convenience while giving you complete ownership of your identity.
+
+<Note>
+  **Platform Support**: BioKey works on any device with a platform authenticator. PRF support (V2) is available on Android Chrome and Safari 18+. V1 fallback ensures compatibility on all WebAuthn-capable platforms.
+</Note>
+
+## Architecture
+
+BioKey is distributed as a monorepo with four packages:
+
+- **biokey-core** — WebAuthn + HKDF primitives for key derivation
+- **biokey-js** — Browser SDK with full enrollment and authentication flows
+- **biokey-react** — React hook (`useBioKey`) for easy integration
+- **biokey-server** — Reference auth server (Bun + Hono + SQLite)
+
+Each package can be used independently or together to build complete authentication systems.

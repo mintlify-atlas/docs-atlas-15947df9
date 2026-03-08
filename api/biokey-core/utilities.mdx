@@ -1,0 +1,228 @@
+---
+title: 'Utilities'
+description: 'Helper functions for key derivation and encoding'
+---
+
+The `@biokey/core` package exports utility functions for working with cryptographic keys, buffers, and the WebAuthn PRF extension.
+
+## Encoding Utilities
+
+### bufToHex()
+
+Converts an ArrayBuffer or Uint8Array to a hex string.
+
+```javascript
+import { bufToHex } from '@biokey/core'
+
+const hex = bufToHex(buffer)
+```
+
+<ParamField path="buf" type="ArrayBuffer | Uint8Array" required>
+  Binary data to convert
+</ParamField>
+
+<ResponseField name="return" type="string">
+  Hex-encoded string (lowercase, no `0x` prefix)
+</ResponseField>
+
+**Example:**
+```javascript
+const buffer = new Uint8Array([255, 0, 128])
+const hex = bufToHex(buffer) // 'ff0080'
+```
+
+### hexToBuf()
+
+Converts a hex string to an ArrayBuffer.
+
+```javascript
+import { hexToBuf } from '@biokey/core'
+
+const buffer = hexToBuf(hex)
+```
+
+<ParamField path="hex" type="string" required>
+  Hex-encoded string (with or without `0x` prefix)
+</ParamField>
+
+<ResponseField name="return" type="ArrayBuffer">
+  Binary data as ArrayBuffer
+</ResponseField>
+
+**Example:**
+```javascript
+const hex = 'ff0080'
+const buffer = hexToBuf(hex) // ArrayBuffer with [255, 0, 128]
+```
+
+## Key Derivation
+
+### deriveKey()
+
+Derives a 256-bit key from a credential's rawId using HKDF-SHA256. This is the V1 fallback method for environments without PRF support.
+
+```javascript
+import { deriveKey } from '@biokey/core'
+
+const key = await deriveKey(rawId)
+```
+
+<ParamField path="rawId" type="ArrayBuffer" required>
+  Credential rawId from WebAuthn credential
+</ParamField>
+
+<ResponseField name="return" type="Promise<Uint8Array>">
+  32-byte derived key
+</ResponseField>
+
+**HKDF Parameters:**
+- **Hash**: SHA-256
+- **Salt**: `'biokey-v1-salt'` (UTF-8 encoded)
+- **Info**: `'biokey-identity-seed'` (UTF-8 encoded)
+- **Output**: 256 bits (32 bytes)
+
+**Example:**
+```javascript
+const credential = await navigator.credentials.create({...})
+const seed = await deriveKey(credential.rawId)
+const publicKey = bufToHex(seed)
+```
+
+<Warning>
+  The rawId is a credential identifier, not a secret. This derivation method is a best-effort approach for platforms without PRF support. Prefer PRF extension when available.
+</Warning>
+
+## PRF Extension Utilities
+
+### isPRFSupported()
+
+Checks if a credential supports the PRF extension.
+
+```javascript
+import { isPRFSupported } from '@biokey/core'
+
+const supported = isPRFSupported(credential)
+```
+
+<ParamField path="credential" type="PublicKeyCredential" required>
+  WebAuthn credential object
+</ParamField>
+
+<ResponseField name="return" type="boolean">
+  `true` if PRF extension is enabled or returned results
+</ResponseField>
+
+**Example:**
+```javascript
+const credential = await navigator.credentials.create({...})
+if (isPRFSupported(credential)) {
+  console.log('PRF extension is available')
+}
+```
+
+### extractPRFOutput()
+
+Extracts the PRF output from a credential's extension results.
+
+```javascript
+import { extractPRFOutput } from '@biokey/core'
+
+const output = extractPRFOutput(credential)
+```
+
+<ParamField path="credential" type="PublicKeyCredential" required>
+  WebAuthn credential from `create()` or `get()`
+</ParamField>
+
+<ResponseField name="return" type="Uint8Array | null">
+  32-byte PRF output, or `null` if unavailable
+</ResponseField>
+
+**Example:**
+```javascript
+const credential = await navigator.credentials.create({
+  publicKey: {
+    // ... other options
+    extensions: {
+      prf: { eval: { first: PRF_SALT } }
+    }
+  }
+})
+
+const prfOutput = extractPRFOutput(credential)
+if (prfOutput) {
+  const publicKey = bufToHex(prfOutput)
+  console.log('PRF-derived key:', publicKey)
+}
+```
+
+### PRF_SALT
+
+Constant salt value used for PRF extension evaluation.
+
+```javascript
+import { PRF_SALT } from '@biokey/core'
+```
+
+<ResponseField name="PRF_SALT" type="Uint8Array">
+  UTF-8 encoded string `'biokey-prf-v2-salt'`
+</ResponseField>
+
+**Usage:**
+```javascript
+const credential = await navigator.credentials.create({
+  publicKey: {
+    extensions: {
+      prf: { eval: { first: PRF_SALT } }
+    }
+  }
+})
+```
+
+<Info>
+  The same `PRF_SALT` must be used during both enrollment (`create`) and authentication (`get`) to derive the same deterministic output.
+</Info>
+
+## Complete Example
+
+```javascript
+import {
+  bufToHex,
+  hexToBuf,
+  deriveKey,
+  extractPRFOutput,
+  isPRFSupported,
+  PRF_SALT
+} from '@biokey/core'
+
+// Create credential with PRF
+const credential = await navigator.credentials.create({
+  publicKey: {
+    // ... other options
+    extensions: {
+      prf: { eval: { first: PRF_SALT } }
+    }
+  }
+})
+
+// Check PRF support and extract output
+let publicKey, method
+
+if (isPRFSupported(credential)) {
+  const prfOutput = extractPRFOutput(credential)
+  publicKey = bufToHex(prfOutput)
+  method = 'prf'
+} else {
+  // Fallback to rawId derivation
+  const seed = await deriveKey(credential.rawId)
+  publicKey = bufToHex(seed)
+  method = 'rawid'
+}
+
+const credentialId = bufToHex(credential.rawId)
+console.log({ publicKey, credentialId, method })
+```
+
+## Source Reference
+
+See `/packages/biokey-core/src/derive.js`

@@ -1,0 +1,493 @@
+---
+title: "Installation"
+description: "Install BioKey packages for your stack"
+---
+
+BioKey provides four packages, each serving a different part of the authentication flow:
+
+<CardGroup cols={2}>
+  <Card title="biokey-core" icon="cube">
+    Low-level WebAuthn + key derivation primitives
+  </Card>
+  <Card title="biokey-js" icon="browser">
+    High-level browser SDK with localStorage and optional server sync
+  </Card>
+  <Card title="biokey-react" icon="react">
+    React hook wrapping `biokey-js`
+  </Card>
+  <Card title="biokey-server" icon="server">
+    Bun + Hono authentication server with SQLite
+  </Card>
+</CardGroup>
+
+---
+
+## biokey-core
+
+Core library for WebAuthn enrollment, authentication, and key derivation. Use this if you want full control or need to build custom integrations.
+
+### Install
+
+<CodeGroup>
+```bash npm
+npm install biokey-core
+```
+
+```bash yarn
+yarn add biokey-core
+```
+
+```bash pnpm
+pnpm add biokey-core
+```
+
+```bash bun
+bun add biokey-core
+```
+</CodeGroup>
+
+### Usage
+
+```javascript
+import { BioKey } from 'biokey-core'
+
+const biokey = new BioKey({
+  rpId: location.hostname,
+  rpName: 'My App'
+})
+
+// Enroll
+const identity = await biokey.enroll()
+// → { publicKey, credentialId, enrolledAt, method }
+
+// Authenticate
+const result = await biokey.authenticate(identity)
+// → { verified: true, publicKey, method }
+```
+
+### Exports
+
+| Export | Description |
+|--------|-------------|
+| `BioKey` | Main class for enrollment and authentication |
+| `enroll(rpId, rpName)` | Standalone enrollment function |
+| `authenticate(identity, rpId)` | Standalone authentication function |
+| `deriveKey(rawId)` | HKDF-SHA256 key derivation (V1 fallback) |
+| `extractPRFOutput(credential)` | Extract PRF secret from WebAuthn credential |
+| `isPRFSupported()` | Check if platform supports PRF extension |
+| `bufToHex(buffer)` | Convert ArrayBuffer to hex string |
+| `hexToBuf(hex)` | Convert hex string to ArrayBuffer |
+| `PRF_SALT` | PRF salt constant (`"biokey-prf-v2-salt"`) |
+
+<Note>
+  **When to use**: Building a custom client, integrating with non-browser environments, or researching the protocol.
+</Note>
+
+---
+
+## biokey-js
+
+Browser SDK with localStorage persistence and optional server sync. Recommended for most web applications.
+
+### Install
+
+<CodeGroup>
+```bash npm
+npm install biokey-js
+```
+
+```bash yarn
+yarn add biokey-js
+```
+
+```bash pnpm
+pnpm add biokey-js
+```
+
+```bash bun
+bun add biokey-js
+```
+</CodeGroup>
+
+### Usage
+
+<CodeGroup>
+```javascript Standalone (no server)
+import { BioKeyClient } from 'biokey-js'
+
+const biokey = new BioKeyClient()
+
+await biokey.enroll()
+await biokey.authenticate()
+```
+
+```javascript With server
+import { BioKeyClient } from 'biokey-js'
+
+const biokey = new BioKeyClient({
+  serverUrl: 'https://your-biokey-server.railway.app'
+})
+
+await biokey.enroll('user-123')
+await biokey.authenticate('user-123')
+```
+</CodeGroup>
+
+### API Reference
+
+#### Constructor Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rpId` | `string` | `location.hostname` | Relying party ID (must match domain) |
+| `rpName` | `string` | `'BioKey'` | Display name shown during enrollment |
+| `serverUrl` | `string \| null` | `null` | Optional biokey-server URL for cross-device auth |
+
+#### Methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `enroll(userId?)` | `Promise<Identity>` | Trigger fingerprint enrollment |
+| `authenticate(userId?)` | `Promise<{ verified, publicKey }>` | Verify fingerprint |
+| `getIdentity()` | `Identity \| null` | Retrieve stored identity from localStorage |
+| `clearIdentity()` | `void` | Remove stored identity |
+
+#### Identity Type
+
+```typescript
+{
+  publicKey: string      // 64-char hex identity key
+  credentialId: string   // Hex-encoded WebAuthn credential ID
+  deviceId: string       // 16-char hex device fingerprint
+  enrolledAt: number     // Unix timestamp (ms)
+  method: 'prf' | 'rawid'  // Key derivation method
+}
+```
+
+<Note>
+  **When to use**: Production web apps, SPAs, or any project that needs localStorage-backed identity management.
+</Note>
+
+---
+
+## biokey-react
+
+React hook for BioKey. Wraps `biokey-js` with state management.
+
+### Install
+
+<CodeGroup>
+```bash npm
+npm install biokey-react
+```
+
+```bash yarn
+yarn add biokey-react
+```
+
+```bash pnpm
+pnpm add biokey-react
+```
+
+```bash bun
+bun add biokey-react
+```
+</CodeGroup>
+
+<Warning>
+  **Peer dependency**: Requires React 18+. Install `react` separately if not already in your project.
+</Warning>
+
+### Usage
+
+```jsx
+import { useBioKey } from 'biokey-react'
+
+export function LoginButton() {
+  const { 
+    identity, 
+    status, 
+    error, 
+    isEnrolled, 
+    isLoading, 
+    enroll, 
+    authenticate, 
+    reset 
+  } = useBioKey({
+    serverUrl: 'https://your-biokey-server.railway.app'
+  })
+
+  if (!isEnrolled) {
+    return (
+      <button onClick={() => enroll('user-123')} disabled={isLoading}>
+        {isLoading ? 'Scanning...' : 'Enroll Fingerprint'}
+      </button>
+    )
+  }
+
+  return (
+    <div>
+      <p>Identity: {identity.publicKey.slice(0, 16)}...</p>
+      <button onClick={() => authenticate('user-123')} disabled={isLoading}>
+        {isLoading ? 'Verifying...' : 'Authenticate'}
+      </button>
+      <button onClick={reset}>Reset</button>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+    </div>
+  )
+}
+```
+
+### Hook Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rpId` | `string` | `location.hostname` | Relying party ID |
+| `rpName` | `string` | `'BioKey'` | Display name |
+| `serverUrl` | `string \| null` | `null` | Optional server URL |
+
+### Return Values
+
+| Value | Type | Description |
+|-------|------|-------------|
+| `identity` | `Identity \| null` | Stored identity object |
+| `status` | `string` | `idle` \| `enrolling` \| `enrolled` \| `authenticating` \| `authenticated` \| `error` |
+| `error` | `string \| null` | Error message from last operation |
+| `isEnrolled` | `boolean` | Whether an identity exists |
+| `isLoading` | `boolean` | True during enrollment or authentication |
+| `enroll(userId?)` | `function` | Start enrollment flow |
+| `authenticate(userId?)` | `function` | Start authentication flow |
+| `reset()` | `function` | Clear stored identity |
+
+<Note>
+  **When to use**: React apps (Next.js, Vite, CRA) where you want declarative state management.
+</Note>
+
+---
+
+## biokey-server
+
+Authentication server built with Bun, Hono, and SQLite. Provides challenge issuance, enrollment, and verification endpoints.
+
+### Install
+
+The server is a standalone package, not a library:
+
+```bash
+git clone https://github.com/Cryptoistaken/BioAuth.git
+cd BioAuth/packages/biokey-server
+bun install
+```
+
+### Run Locally
+
+<CodeGroup>
+```bash Development
+bun run dev
+# Server runs on http://localhost:3000
+```
+
+```bash Production
+bun run start
+```
+</CodeGroup>
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `3000` | Server port |
+| `DATABASE_PATH` | `./biokey.db` | SQLite database file path |
+
+### Endpoints
+
+See the [Server API Reference](/api/biokey-server/endpoints) for full endpoint documentation.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/challenge` | Generate a single-use authentication challenge |
+| `POST` | `/enroll` | Register a new identity public key |
+| `POST` | `/verify` | Verify a challenge with a userId |
+
+### Deploy
+
+<CodeGroup>
+```bash Railway
+# Install Railway CLI
+npm i -g @railway/cli
+
+# Login and deploy
+railway login
+railway up
+```
+
+```bash Fly.io
+# Install flyctl
+curl -L https://fly.io/install.sh | sh
+
+# Deploy
+fly launch
+fly deploy
+```
+
+```bash Docker
+docker build -t biokey-server .
+docker run -p 3000:3000 biokey-server
+```
+</CodeGroup>
+
+<Info>
+  The server uses an in-memory SQLite database by default. For production, configure a persistent volume or use a managed database.
+</Info>
+
+<Note>
+  **When to use**: You need cross-device authentication, multi-session support, or server-side identity verification.
+</Note>
+
+---
+
+## Framework-Specific Setup
+
+### Next.js (App Router)
+
+```bash
+npx create-next-app@latest my-biokey-app
+cd my-biokey-app
+npm install biokey-react
+```
+
+Create a client component:
+
+```jsx app/components/BioKeyAuth.tsx
+'use client'
+
+import { useBioKey } from 'biokey-react'
+
+export function BioKeyAuth() {
+  const { isEnrolled, enroll, authenticate } = useBioKey()
+  // ... your component logic
+}
+```
+
+### Vite + React
+
+```bash
+npm create vite@latest my-biokey-app -- --template react
+cd my-biokey-app
+npm install biokey-react
+npm run dev
+```
+
+### Vanilla JavaScript (no framework)
+
+```bash
+mkdir my-biokey-app && cd my-biokey-app
+npm init -y
+npm install biokey-js
+```
+
+Create `index.html`:
+
+```html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>BioKey Demo</title>
+  </head>
+  <body>
+    <button id="enroll">Enroll</button>
+    <button id="auth">Authenticate</button>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
+```
+
+Create `main.js`:
+
+```javascript
+import { BioKeyClient } from 'biokey-js'
+
+const biokey = new BioKeyClient()
+
+document.getElementById('enroll').onclick = async () => {
+  const identity = await biokey.enroll()
+  console.log('Enrolled:', identity)
+}
+
+document.getElementById('auth').onclick = async () => {
+  const result = await biokey.authenticate()
+  console.log('Authenticated:', result)
+}
+```
+
+---
+
+## Browser Compatibility
+
+BioKey relies on WebAuthn and Web Crypto APIs:
+
+| Browser | Min Version | PRF Support | Notes |
+|---------|-------------|-------------|-------|
+| Chrome | 100+ | ✅ Android | Full support |
+| Safari | 16+ | ⚠️ 18+ only | PRF in Safari 18+, falls back to V1 on older versions |
+| Firefox | 119+ | ❌ Fallback | Uses rawId-HKDF (V1) |
+| Edge | 100+ | ✅ Windows | Full support with Windows Hello |
+
+<Warning>
+  **HTTPS required**: WebAuthn requires a secure context (HTTPS or `localhost`). Development over HTTP will fail.
+</Warning>
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Error: 'NotAllowedError: The operation either timed out or was not allowed'">
+    **Cause**: User canceled the biometric prompt or the authenticator timed out.
+
+    **Solution**: Retry the operation. Ensure the timeout is set to at least 60 seconds (default in BioKey).
+  </Accordion>
+
+  <Accordion title="Error: 'SecurityError: The operation is insecure'">
+    **Cause**: WebAuthn requires HTTPS or `localhost`.
+
+    **Solution**: Use `https://` or deploy to a hosting platform (Vercel, Netlify, Railway) for testing.
+  </Accordion>
+
+  <Accordion title="PRF not supported — falling back to V1">
+    **Cause**: Platform doesn't support the WebAuthn PRF extension.
+
+    **Solution**: This is expected. BioKey automatically falls back to rawId-HKDF (V1). The identity will still work.
+  </Accordion>
+
+  <Accordion title="Key mismatch error during authentication">
+    **Cause**: The derived key doesn't match the stored `publicKey`.
+
+    **Solution**: 
+    - Different device: Each device produces a unique identity. Use the server for cross-device auth.
+    - Credential deleted: The authenticator credential was removed. Re-enroll.
+    - Browser storage cleared: localStorage was wiped. Re-enroll.
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Build your first BioKey integration in 5 minutes
+  </Card>
+
+  <Card title="How It Works" icon="book" href="/concepts/how-it-works">
+    Understand PRF, rawId-HKDF, and key derivation
+  </Card>
+
+  <Card title="Server Setup" icon="server" href="/guides/server-setup">
+    Deploy biokey-server for cross-device auth
+  </Card>
+
+  <Card title="Examples" icon="code" href="/examples/vanilla-js">
+    Explore full code examples
+  </Card>
+</CardGroup>

@@ -1,0 +1,611 @@
+---
+title: React Application
+description: Build a biometric auth system with React and the useBioKey hook
+---
+
+This example shows how to integrate BioKey into a React application using the `useBioKey` hook from the `biokey-react` package.
+
+## Installation
+
+Install both the React package and the core client library:
+
+<CodeGroup>
+
+```bash npm
+npm install biokey-react biokey-js
+```
+
+```bash yarn
+yarn add biokey-react biokey-js
+```
+
+```bash pnpm
+pnpm add biokey-react biokey-js
+```
+
+</CodeGroup>
+
+## Complete Example
+
+Here's a full React application with biometric authentication:
+
+<CodeGroup>
+
+```jsx App.jsx
+import { useBioKey } from 'biokey-react'
+import { useState } from 'react'
+import './App.css'
+
+function App() {
+  const { 
+    identity, 
+    status, 
+    error, 
+    isEnrolled, 
+    isLoading,
+    enroll, 
+    authenticate, 
+    reset 
+  } = useBioKey({
+    rpName: 'My React App',
+    rpId: window.location.hostname
+  })
+
+  const [userId, setUserId] = useState('user@example.com')
+
+  const handleEnroll = async () => {
+    try {
+      await enroll(userId)
+      console.log('Enrollment successful!')
+    } catch (err) {
+      console.error('Enrollment failed:', err)
+    }
+  }
+
+  const handleAuth = async () => {
+    try {
+      await authenticate(userId)
+      console.log('Authentication successful!')
+    } catch (err) {
+      console.error('Authentication failed:', err)
+    }
+  }
+
+  const formatKey = (key) => {
+    if (!key) return ''
+    return key.match(/.{8}/g).join(' ')
+  }
+
+  return (
+    <div className="app">
+      <div className="card">
+        <h1>BioKey React Demo</h1>
+        
+        <div className="status-badge">
+          <span className={`badge ${isEnrolled ? 'enrolled' : 'not-enrolled'}`}>
+            {isEnrolled ? '✓ Enrolled' : 'Not Enrolled'}
+          </span>
+          {status !== 'idle' && (
+            <span className="status-text">{status}</span>
+          )}
+        </div>
+
+        {isEnrolled && identity && (
+          <div className="identity-display">
+            <label>Identity Key</label>
+            <code>{formatKey(identity.publicKey)}</code>
+            <div className="metadata">
+              <small>Method: {identity.method}</small>
+              <small>Device: {identity.deviceId}</small>
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="error-message">
+            {error}
+          </div>
+        )}
+
+        {!isEnrolled && (
+          <div className="input-group">
+            <label htmlFor="userId">User ID</label>
+            <input
+              id="userId"
+              type="email"
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              placeholder="user@example.com"
+            />
+          </div>
+        )}
+
+        <div className="actions">
+          {!isEnrolled ? (
+            <button 
+              onClick={handleEnroll} 
+              disabled={isLoading || !userId}
+              className="btn btn-primary"
+            >
+              {isLoading ? 'Waiting for fingerprint...' : 'Enroll'}
+            </button>
+          ) : (
+            <>
+              <button 
+                onClick={handleAuth} 
+                disabled={isLoading}
+                className="btn btn-success"
+              >
+                {isLoading ? 'Authenticating...' : 'Authenticate'}
+              </button>
+              <button 
+                onClick={reset}
+                className="btn btn-ghost"
+              >
+                Reset
+              </button>
+            </>
+          )}
+        </div>
+
+        <p className="note">
+          Your biometric data never leaves your device.
+          <br />
+          Requires HTTPS or localhost.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+export default App
+```
+
+```jsx main.jsx
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+```
+
+```css App.css
+.app {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+.card {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  padding: 40px;
+  max-width: 480px;
+  width: 100%;
+}
+
+h1 {
+  margin: 0 0 24px 0;
+  font-size: 28px;
+  color: #1a202c;
+  text-align: center;
+}
+
+.status-badge {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  background: #f7fafc;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.badge {
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.badge.not-enrolled {
+  background: #e2e8f0;
+  color: #4a5568;
+}
+
+.badge.enrolled {
+  background: #c6f6d5;
+  color: #22543d;
+}
+
+.status-text {
+  font-size: 14px;
+  color: #718096;
+  text-transform: capitalize;
+}
+
+.identity-display {
+  background: #f7fafc;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.identity-display label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #718096;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.identity-display code {
+  display: block;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  color: #2d3748;
+  background: white;
+  padding: 12px;
+  border-radius: 6px;
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+.metadata {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.metadata small {
+  font-size: 11px;
+  color: #a0aec0;
+}
+
+.error-message {
+  background: #fed7d7;
+  color: #742a2a;
+  border: 1px solid #fc8181;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.input-group {
+  margin-bottom: 20px;
+}
+
+.input-group label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  color: #2d3748;
+  margin-bottom: 8px;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.input-group input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.btn {
+  flex: 1;
+  padding: 14px 24px;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #667eea;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #5a67d8;
+  transform: translateY(-1px);
+}
+
+.btn-success {
+  background: #48bb78;
+  color: white;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #38a169;
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: #e53e3e;
+  border: 2px solid #e53e3e;
+}
+
+.btn-ghost:hover {
+  background: #fff5f5;
+}
+
+.note {
+  margin-top: 24px;
+  font-size: 12px;
+  color: #718096;
+  text-align: center;
+  line-height: 1.6;
+}
+```
+
+```css index.css
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+```
+
+```json package.json
+{
+  "name": "biokey-react-example",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "biokey-react": "latest",
+    "biokey-js": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^5.0.0"
+  }
+}
+```
+
+</CodeGroup>
+
+## The useBioKey Hook
+
+The `useBioKey` hook provides a complete interface for biometric authentication:
+
+### Hook API
+
+```typescript
+const {
+  // State
+  identity,      // Current identity object or null
+  status,        // 'idle' | 'enrolling' | 'enrolled' | 'authenticating' | 'authenticated' | 'error'
+  error,         // Error message if status is 'error'
+  isEnrolled,    // Boolean: is user enrolled?
+  isLoading,     // Boolean: is an operation in progress?
+  
+  // Actions
+  enroll,        // (userId?) => Promise<identity>
+  authenticate,  // (userId?) => Promise<result>
+  reset          // () => void - clears enrollment
+} = useBioKey(options)
+```
+
+### Options
+
+```typescript
+interface BioKeyOptions {
+  rpId?: string       // Relying party ID (defaults to hostname)
+  rpName?: string     // Relying party name
+  serverUrl?: string  // Optional server URL for remote verification
+}
+```
+
+## Advanced: Login Component
+
+Here's a more production-ready login component:
+
+```jsx LoginForm.jsx
+import { useBioKey } from 'biokey-react'
+import { useState } from 'react'
+
+export function LoginForm({ onSuccess }) {
+  const [email, setEmail] = useState('')
+  const { isEnrolled, isLoading, error, enroll, authenticate } = useBioKey()
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    
+    try {
+      if (isEnrolled) {
+        // Authenticate existing user
+        const result = await authenticate(email)
+        onSuccess({ email, verified: true, ...result })
+      } else {
+        // Enroll new user
+        const result = await enroll(email)
+        onSuccess({ email, enrolled: true, ...result })
+      }
+    } catch (err) {
+      console.error('Login failed:', err)
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="Enter your email"
+        required
+      />
+      
+      {error && <div className="error">{error}</div>}
+      
+      <button type="submit" disabled={isLoading || !email}>
+        {isLoading ? (
+          'Waiting for biometric...'
+        ) : isEnrolled ? (
+          'Sign In with Biometric'
+        ) : (
+          'Enroll Biometric'
+        )}
+      </button>
+    </form>
+  )
+}
+```
+
+## Running the Example
+
+<Steps>
+  <Step title="Create Project">
+    ```bash
+    npm create vite@latest biokey-demo -- --template react
+    cd biokey-demo
+    ```
+  </Step>
+  
+  <Step title="Install Dependencies">
+    ```bash
+    npm install biokey-react biokey-js
+    ```
+  </Step>
+  
+  <Step title="Copy Code">
+    Replace `App.jsx` and `App.css` with the code above.
+  </Step>
+  
+  <Step title="Run Dev Server">
+    ```bash
+    npm run dev
+    ```
+  </Step>
+</Steps>
+
+<Note>
+**HTTPS Required:** WebAuthn only works on `localhost` or HTTPS origins. When deploying, ensure your site uses HTTPS.
+</Note>
+
+## State Management
+
+The hook manages state automatically, but you can also integrate with external state:
+
+```jsx Using Context
+import { createContext, useContext } from 'react'
+import { useBioKey } from 'biokey-react'
+
+const AuthContext = createContext(null)
+
+export function AuthProvider({ children }) {
+  const biokey = useBioKey({ rpName: 'My App' })
+  
+  return (
+    <AuthContext.Provider value={biokey}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+export function useAuth() {
+  const context = useContext(AuthContext)
+  if (!context) throw new Error('useAuth must be used within AuthProvider')
+  return context
+}
+```
+
+Then use it anywhere:
+
+```jsx
+function ProfileButton() {
+  const { isEnrolled, authenticate } = useAuth()
+  
+  return (
+    <button onClick={() => authenticate()}>
+      {isEnrolled ? 'Verify Identity' : 'Set Up Biometric'}
+    </button>
+  )
+}
+```
+
+## TypeScript Support
+
+The hook is fully typed. Install type definitions:
+
+```bash
+npm install -D @types/webauthn
+```
+
+Use with TypeScript:
+
+```tsx
+import { useBioKey } from 'biokey-react'
+import type { BioKeyIdentity } from 'biokey-js'
+
+function App() {
+  const { identity, enroll, authenticate } = useBioKey()
+  
+  const handleEnroll = async (): Promise<void> => {
+    const result: BioKeyIdentity = await enroll('user@example.com')
+    console.log('Enrolled:', result.publicKey)
+  }
+  
+  // ...
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Full-Stack Example" icon="server" href="/examples/full-stack">
+    Add server-side verification and user management
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/biokey-react/use-biokey">
+    Complete API documentation for useBioKey
+  </Card>
+</CardGroup>

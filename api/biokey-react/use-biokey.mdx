@@ -1,0 +1,352 @@
+---
+title: 'useBioKey Hook'
+description: 'React hook for biometric authentication with WebAuthn'
+---
+
+## Overview
+
+The `useBioKey` hook provides a complete React interface for biometric authentication. It manages the BioKeyClient instance, handles state management, and provides methods for enrollment, authentication, and identity management.
+
+## Import
+
+```javascript
+import { useBioKey } from 'biokey-react'
+```
+
+## Usage
+
+```jsx
+import { useBioKey } from 'biokey-react'
+
+function App() {
+  const { 
+    identity, 
+    status, 
+    error, 
+    isEnrolled, 
+    isLoading, 
+    enroll, 
+    authenticate, 
+    reset 
+  } = useBioKey({
+    rpId: 'example.com',
+    rpName: 'My App',
+    serverUrl: 'https://api.example.com'
+  })
+
+  return (
+    <div>
+      {isEnrolled ? (
+        <button onClick={() => authenticate('user-123')} disabled={isLoading}>
+          {isLoading ? 'Authenticating...' : 'Authenticate'}
+        </button>
+      ) : (
+        <button onClick={() => enroll('user-123')} disabled={isLoading}>
+          {isLoading ? 'Enrolling...' : 'Enroll Biometric'}
+        </button>
+      )}
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+    </div>
+  )
+}
+```
+
+## Parameters
+
+The hook accepts an optional `options` object that is passed directly to the BioKeyClient constructor.
+
+<ParamField path="options" type="object" optional>
+  Configuration options for the BioKeyClient instance
+  
+  <Expandable title="properties">
+    <ParamField path="rpId" type="string" optional>
+      Relying Party identifier. Defaults to `location.hostname`. This must match the domain where your app is hosted.
+      
+      ```javascript
+      useBioKey({ rpId: 'example.com' })
+      ```
+    </ParamField>
+    
+    <ParamField path="rpName" type="string" optional>
+      Human-readable name for your application. Defaults to `'BioKey'`. This name appears in the browser's authentication prompt.
+      
+      ```javascript
+      useBioKey({ rpName: 'My Application' })
+      ```
+    </ParamField>
+    
+    <ParamField path="serverUrl" type="string | null" optional>
+      Base URL for your BioKey server. If provided, the hook will sync enrollment and authentication with the server. Defaults to `null` (client-only mode).
+      
+      ```javascript
+      useBioKey({ serverUrl: 'https://api.example.com' })
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Return Value
+
+The hook returns an object with state values and methods:
+
+<ResponseField name="identity" type="object | null">
+  The current enrolled identity. Contains credential information if a user has enrolled, otherwise `null`.
+  
+  <Expandable title="properties">
+    <ResponseField name="publicKey" type="string">
+      Hex-encoded derived public key from the biometric credential
+    </ResponseField>
+    
+    <ResponseField name="credentialId" type="string">
+      Hex-encoded WebAuthn credential ID
+    </ResponseField>
+    
+    <ResponseField name="deviceId" type="string">
+      Device fingerprint identifier
+    </ResponseField>
+    
+    <ResponseField name="enrolledAt" type="number">
+      Timestamp when the credential was enrolled (milliseconds since epoch)
+    </ResponseField>
+    
+    <ResponseField name="method" type="'prf' | 'rawid'">
+      Key derivation method used (`'prf'` for PRF extension, `'rawid'` for fallback HKDF)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Current operation status. One of:
+  - `'idle'` - No operation in progress
+  - `'enrolling'` - Enrollment in progress
+  - `'enrolled'` - Enrollment completed successfully
+  - `'authenticating'` - Authentication in progress
+  - `'authenticated'` - Authentication completed successfully
+  - `'error'` - An error occurred
+</ResponseField>
+
+<ResponseField name="error" type="string | null">
+  Error message if an operation failed, otherwise `null`
+</ResponseField>
+
+<ResponseField name="isEnrolled" type="boolean">
+  Convenience boolean indicating if a credential is enrolled (`!!identity`)
+</ResponseField>
+
+<ResponseField name="isLoading" type="boolean">
+  Convenience boolean indicating if an operation is in progress (`status === 'enrolling' || status === 'authenticating'`)
+</ResponseField>
+
+<ResponseField name="enroll" type="(userId?: string) => Promise<object>">
+  Function to enroll a new biometric credential. See [Hooks API](/api/biokey-react/hooks-api#enroll) for details.
+</ResponseField>
+
+<ResponseField name="authenticate" type="(userId?: string) => Promise<object>">
+  Function to authenticate using the enrolled credential. See [Hooks API](/api/biokey-react/hooks-api#authenticate) for details.
+</ResponseField>
+
+<ResponseField name="reset" type="() => void">
+  Function to clear the stored identity and reset state. See [Hooks API](/api/biokey-react/hooks-api#reset) for details.
+</ResponseField>
+
+## Complete Example
+
+Here's a complete authentication component with error handling and state management:
+
+```jsx
+import { useBioKey } from 'biokey-react'
+import { useEffect } from 'react'
+
+function BiometricAuth({ userId, onAuthenticated }) {
+  const {
+    identity,
+    status,
+    error,
+    isEnrolled,
+    isLoading,
+    enroll,
+    authenticate,
+    reset
+  } = useBioKey({
+    rpId: 'myapp.com',
+    rpName: 'My Secure App',
+    serverUrl: 'https://api.myapp.com'
+  })
+
+  const handleEnroll = async () => {
+    try {
+      const result = await enroll(userId)
+      console.log('Enrolled successfully:', result)
+    } catch (err) {
+      console.error('Enrollment failed:', err)
+    }
+  }
+
+  const handleAuthenticate = async () => {
+    try {
+      const result = await authenticate(userId)
+      console.log('Authenticated:', result)
+      onAuthenticated(result)
+    } catch (err) {
+      console.error('Authentication failed:', err)
+    }
+  }
+
+  const handleReset = () => {
+    if (confirm('Remove your biometric credential?')) {
+      reset()
+    }
+  }
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      console.log('User authenticated with public key:', identity.publicKey)
+    }
+  }, [status, identity])
+
+  return (
+    <div>
+      <h2>Biometric Authentication</h2>
+      
+      {error && (
+        <div style={{ color: 'red', padding: '10px', marginBottom: '10px' }}>
+          Error: {error}
+        </div>
+      )}
+      
+      <div style={{ marginBottom: '10px' }}>
+        <strong>Status:</strong> {status}
+      </div>
+      
+      {identity && (
+        <div style={{ marginBottom: '10px' }}>
+          <strong>Enrolled:</strong> {new Date(identity.enrolledAt).toLocaleString()}<br/>
+          <strong>Method:</strong> {identity.method}<br/>
+          <strong>Device:</strong> {identity.deviceId}
+        </div>
+      )}
+      
+      <div style={{ display: 'flex', gap: '10px' }}>
+        {!isEnrolled ? (
+          <button 
+            onClick={handleEnroll} 
+            disabled={isLoading}
+            style={{ padding: '10px 20px' }}
+          >
+            {isLoading ? 'Enrolling...' : 'Enroll Biometric'}
+          </button>
+        ) : (
+          <>
+            <button 
+              onClick={handleAuthenticate} 
+              disabled={isLoading}
+              style={{ padding: '10px 20px' }}
+            >
+              {isLoading ? 'Authenticating...' : 'Authenticate'}
+            </button>
+            <button 
+              onClick={handleReset} 
+              disabled={isLoading}
+              style={{ padding: '10px 20px' }}
+            >
+              Remove Credential
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export default BiometricAuth
+```
+
+## State Management
+
+The hook automatically manages state for you:
+
+1. **Initial Load**: On mount, the hook reads any existing identity from localStorage and initializes the status to `'idle'`
+2. **Enrollment**: When `enroll()` is called, status changes to `'enrolling'`, then `'enrolled'` on success or `'error'` on failure
+3. **Authentication**: When `authenticate()` is called, status changes to `'authenticating'`, then `'authenticated'` on success or `'error'` on failure
+4. **Reset**: When `reset()` is called, identity is cleared and status returns to `'idle'`
+5. **Errors**: Any errors are caught and stored in the `error` state, and the status changes to `'error'`
+
+## Error Handling
+
+The hook provides multiple ways to handle errors:
+
+### Using the error state
+
+```jsx
+const { error, status } = useBioKey()
+
+if (status === 'error' && error) {
+  return <div>Error: {error}</div>
+}
+```
+
+### Using try-catch
+
+```jsx
+const { enroll } = useBioKey()
+
+try {
+  await enroll('user-123')
+} catch (err) {
+  // Handle error
+  console.error('Enrollment failed:', err.message)
+}
+```
+
+### Common errors
+
+- `"No enrolled credential. Call enroll() first."` - Attempted to authenticate without enrolling first
+- `"PRF key mismatch — identity verification failed."` - Biometric verification failed (wrong user)
+- `"Server verification failed."` - Server rejected the authentication
+- Browser errors - WebAuthn API errors (user cancelled, no biometrics available, etc.)
+
+## Client Instance Stability
+
+The hook uses `useRef` to maintain a stable BioKeyClient instance across re-renders. The client is only created once when the component first mounts, ensuring that:
+
+- Configuration options are applied consistently
+- Local storage operations remain stable
+- Multiple hook calls in the same component tree share the same client instance
+
+## Best Practices
+
+<Tip>
+  **Pass options on first render**: The `options` object is only used when creating the client instance. Changing options after mount will not affect the client.
+</Tip>
+
+<Tip>
+  **Handle loading states**: Always disable UI elements when `isLoading` is true to prevent duplicate operations.
+</Tip>
+
+<Warning>
+  **Store userId separately**: The hook does not store the userId - you must manage this in your application state and pass it to `enroll()` and `authenticate()`.
+</Warning>
+
+<Note>
+  **Server URL is optional**: If you omit `serverUrl`, the hook works in client-only mode with credentials stored in localStorage.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Hooks API Reference" icon="book" href="/api/biokey-react/hooks-api">
+    Detailed reference for all methods and state values
+  </Card>
+  
+  <Card title="React Integration Guide" icon="react" href="/guides/react-integration">
+    Complete guide for integrating BioKey in React apps
+  </Card>
+  
+  <Card title="BioKeyClient" icon="code" href="/api/biokey-js/biokey-client">
+    Learn about the underlying client class
+  </Card>
+  
+  <Card title="Examples" icon="flask" href="/examples/react-app">
+    See full React application examples
+  </Card>
+</CardGroup>

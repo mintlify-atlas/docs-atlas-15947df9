@@ -1,0 +1,305 @@
+---
+title: Browser SDK Guide
+description: Complete guide to using the BioKey JavaScript SDK for passwordless authentication in web applications
+---
+
+The BioKey JavaScript SDK (`biokey-js`) provides a simple API for implementing passwordless authentication using WebAuthn and biometric sensors.
+
+## Installation
+
+<Steps>
+  <Step title="Install the package">
+    ```bash
+    npm install biokey-js
+    ```
+  </Step>
+
+  <Step title="Import the client">
+    ```javascript
+    import { BioKeyClient } from 'biokey-js'
+    ```
+  </Step>
+</Steps>
+
+## Basic Usage
+
+### Initialize the Client
+
+Create a new `BioKeyClient` instance with your configuration:
+
+```javascript
+const biokey = new BioKeyClient({
+  rpId: 'example.com',           // Your domain (defaults to location.hostname)
+  rpName: 'My App',              // Display name for your app
+  serverUrl: 'https://api.example.com'  // Optional: server endpoint for multi-device sync
+})
+```
+
+**Configuration Options:**
+
+- `rpId` - Relying Party ID (your domain). Defaults to `location.hostname`
+- `rpName` - Display name shown during biometric prompts. Defaults to `'BioKey'`
+- `serverUrl` - Optional server URL for syncing credentials across devices. Set to `null` for offline-only mode
+
+### Complete Authentication Flow
+
+<Steps>
+  <Step title="Enroll a new user">
+    When a user first signs up or enables biometric authentication:
+
+    ```javascript
+    async function enrollUser(userId) {
+      try {
+        const identity = await biokey.enroll(userId)
+        console.log('Enrolled:', identity)
+        // identity = {
+        //   publicKey: '3a4f2b...',
+        //   credentialId: 'a1b2c3...',
+        //   deviceId: '8f4e...',
+        //   enrolledAt: 1709856000000,
+        //   method: 'prf' // or 'rawid' for fallback
+        // }
+      } catch (error) {
+        console.error('Enrollment failed:', error.message)
+      }
+    }
+    ```
+
+    The browser will prompt the user to use their biometric sensor (Face ID, Touch ID, Windows Hello, etc.).
+  </Step>
+
+  <Step title="Check enrollment status">
+    ```javascript
+    const identity = biokey.getIdentity()
+    if (identity) {
+      console.log('User is enrolled')
+      console.log('Public key:', identity.publicKey)
+    } else {
+      console.log('User needs to enroll')
+    }
+    ```
+  </Step>
+
+  <Step title="Authenticate the user">
+    When the user returns to log in:
+
+    ```javascript
+    async function loginUser(userId) {
+      try {
+        const result = await biokey.authenticate(userId)
+        console.log('Authentication successful:', result)
+        // result = {
+        //   verified: true,
+        //   publicKey: '3a4f2b...',
+        //   method: 'prf'
+        // }
+      } catch (error) {
+        console.error('Authentication failed:', error.message)
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Clear credentials (optional)">
+    If the user wants to remove their biometric login:
+
+    ```javascript
+    biokey.clearIdentity()
+    ```
+  </Step>
+</Steps>
+
+## Complete Example
+
+Here's a full working example with UI:
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <title>BioKey Demo</title>
+</head>
+<body>
+  <div id="app">
+    <h1>BioKey Authentication</h1>
+    <div id="status"></div>
+    <input type="text" id="userId" placeholder="Enter user ID" />
+    <button id="enrollBtn">Enroll</button>
+    <button id="loginBtn">Login</button>
+    <button id="clearBtn">Clear Identity</button>
+  </div>
+
+  <script type="module">
+    import { BioKeyClient } from 'biokey-js'
+
+    const biokey = new BioKeyClient({
+      rpId: location.hostname,
+      rpName: 'BioKey Demo',
+      serverUrl: null // Offline mode
+    })
+
+    const status = document.getElementById('status')
+    const userIdInput = document.getElementById('userId')
+
+    // Check initial status
+    const identity = biokey.getIdentity()
+    if (identity) {
+      status.textContent = `Enrolled on ${new Date(identity.enrolledAt).toLocaleString()}`
+    } else {
+      status.textContent = 'Not enrolled'
+    }
+
+    // Enroll button
+    document.getElementById('enrollBtn').addEventListener('click', async () => {
+      const userId = userIdInput.value || 'demo-user'
+      status.textContent = 'Enrolling...'
+      
+      try {
+        const identity = await biokey.enroll(userId)
+        status.textContent = `✓ Enrolled successfully! Method: ${identity.method}`
+        status.style.color = 'green'
+      } catch (error) {
+        status.textContent = `✗ Enrollment failed: ${error.message}`
+        status.style.color = 'red'
+      }
+    })
+
+    // Login button
+    document.getElementById('loginBtn').addEventListener('click', async () => {
+      const userId = userIdInput.value || 'demo-user'
+      status.textContent = 'Authenticating...'
+      
+      try {
+        const result = await biokey.authenticate(userId)
+        status.textContent = `✓ Authentication successful! Key: ${result.publicKey.slice(0, 8)}...`
+        status.style.color = 'green'
+      } catch (error) {
+        status.textContent = `✗ Authentication failed: ${error.message}`
+        status.style.color = 'red'
+      }
+    })
+
+    // Clear button
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      biokey.clearIdentity()
+      status.textContent = 'Identity cleared'
+      status.style.color = 'gray'
+    })
+  </script>
+</body>
+</html>
+```
+
+## API Reference
+
+### Constructor
+
+```javascript
+new BioKeyClient(options)
+```
+
+Creates a new BioKey client instance.
+
+### Methods
+
+#### `enroll(userId)`
+
+Enrolls a new credential for the user. Returns a Promise that resolves to an identity object.
+
+**Parameters:**
+- `userId` (string, optional) - Unique identifier for the user. If omitted, a random ID is generated.
+
+**Returns:**
+```javascript
+{
+  publicKey: string,      // 64-character hex string
+  credentialId: string,   // Hex-encoded credential ID
+  deviceId: string,       // Unique device identifier
+  enrolledAt: number,     // Timestamp
+  method: 'prf' | 'rawid' // Key derivation method used
+}
+```
+
+#### `authenticate(userId)`
+
+Authenticates the user using their enrolled credential.
+
+**Parameters:**
+- `userId` (string, optional) - User identifier. Required if using server mode.
+
+**Returns:**
+```javascript
+{
+  verified: true,
+  publicKey: string,      // Derived public key
+  method: 'prf' | 'rawid'
+}
+```
+
+#### `getIdentity()`
+
+Returns the currently enrolled identity from local storage, or `null` if not enrolled.
+
+#### `clearIdentity()`
+
+Removes the enrolled credential from local storage.
+
+## Key Derivation Methods
+
+BioKey automatically selects the best available method:
+
+1. **PRF Extension** (preferred) - Uses the WebAuthn PRF extension for deterministic key derivation
+2. **RawId HKDF** (fallback) - Uses HKDF on the credential's rawId for older platforms
+
+The method is stored in the identity object and used consistently for that credential.
+
+## Error Handling
+
+Common errors and how to handle them:
+
+```javascript
+try {
+  await biokey.authenticate(userId)
+} catch (error) {
+  if (error.message.includes('No enrolled credential')) {
+    // User needs to enroll first
+    await biokey.enroll(userId)
+  } else if (error.message.includes('verification failed')) {
+    // Biometric authentication failed or was cancelled
+    console.error('Authentication cancelled or failed')
+  } else if (error.message.includes('Server verification failed')) {
+    // Server rejected the authentication
+    console.error('Server verification failed')
+  }
+}
+```
+
+## Browser Compatibility
+
+BioKey requires:
+- WebAuthn API support
+- Platform authenticator (biometric sensor)
+- HTTPS (required by WebAuthn)
+
+Supported platforms:
+- iOS/iPadOS with Face ID or Touch ID
+- macOS with Touch ID
+- Android with fingerprint sensor
+- Windows with Windows Hello
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="React Integration" icon="react" href="/guides/react-integration">
+    Use the React hook for simpler integration
+  </Card>
+  <Card title="Server Setup" icon="server" href="/guides/server-setup">
+    Set up the server for multi-device sync
+  </Card>
+  <Card title="Offline Mode" icon="wifi" href="/guides/offline-mode">
+    Build without a backend server
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/biokey-js/biokey-client">
+    Full API documentation
+  </Card>
+</CardGroup>

@@ -1,0 +1,290 @@
+---
+title: 'Methods'
+description: 'BioKeyClient instance methods for enrollment, authentication, and identity management'
+---
+
+## enroll()
+
+Creates a new biometric credential and enrolls the user. Attempts PRF (Pseudo-Random Function) enrollment first, with automatic fallback to rawId-HKDF (V1) if the platform authenticator doesn't support PRF.
+
+```javascript
+await client.enroll(userId)
+```
+
+### Parameters
+
+<ParamField path="userId" type="string" optional>
+  Unique identifier for the user.
+  
+  - **With `serverUrl`**: Required. Used to associate the credential with a user account on your backend.
+  - **Without `serverUrl`**: Optional. If omitted, a random 16-byte identifier is generated.
+</ParamField>
+
+### Returns
+
+<ResponseField name="identity" type="object">
+  The enrolled identity object containing:
+  
+  <ResponseField name="publicKey" type="string">
+    Hex-encoded 256-bit public key derived from the biometric credential.
+  </ResponseField>
+  
+  <ResponseField name="credentialId" type="string">
+    Hex-encoded credential ID (rawId) from WebAuthn.
+  </ResponseField>
+  
+  <ResponseField name="deviceId" type="string">
+    16-character device fingerprint derived from browser/system characteristics.
+  </ResponseField>
+  
+  <ResponseField name="enrolledAt" type="number">
+    Unix timestamp (milliseconds) when enrollment occurred.
+  </ResponseField>
+  
+  <ResponseField name="method" type="'prf' | 'rawid'">
+    Enrollment method used:
+    - `'prf'`: Modern PRF extension (preferred)
+    - `'rawid'`: Legacy rawId-HKDF fallback
+  </ResponseField>
+</ResponseField>
+
+### Example
+
+```javascript
+try {
+  const identity = await client.enroll('user-123')
+  console.log('Enrolled successfully:', identity)
+  // {
+  //   publicKey: 'a3f5e8d2...',
+  //   credentialId: '9b2c4f1a...',
+  //   deviceId: '7e3a9c2f1b4d',
+  //   enrolledAt: 1709856234567,
+  //   method: 'prf'
+  // }
+} catch (error) {
+  console.error('Enrollment failed:', error)
+}
+```
+
+### Behavior
+
+1. Generates a random 32-byte challenge
+2. Creates a WebAuthn credential using the platform authenticator
+3. Attempts to use PRF extension for key derivation
+4. Falls back to rawId-HKDF if PRF is not supported
+5. Stores identity in `localStorage`
+6. If `serverUrl` is configured and `userId` provided, registers the credential with the backend
+
+### Error Conditions
+
+- User cancels biometric prompt
+- No platform authenticator available
+- WebAuthn not supported in browser
+- Network error during server registration (enrollment still succeeds locally)
+
+---
+
+## authenticate()
+
+Authenticates the user with their previously enrolled biometric credential. Re-derives the cryptographic key and validates it matches the stored public key.
+
+```javascript
+await client.authenticate(userId)
+```
+
+### Parameters
+
+<ParamField path="userId" type="string" optional>
+  User identifier for server-backed authentication.
+  
+  - **With `serverUrl`**: Required. Used to fetch a challenge from the server and verify the authentication result.
+  - **Without `serverUrl`**: Optional. Authentication is performed client-side only.
+</ParamField>
+
+### Returns
+
+<ResponseField name="result" type="object">
+  Authentication result object:
+  
+  <ResponseField name="verified" type="boolean">
+    Always `true` when authentication succeeds. Method throws on failure.
+  </ResponseField>
+  
+  <ResponseField name="publicKey" type="string">
+    Hex-encoded public key re-derived from the biometric credential.
+  </ResponseField>
+  
+  <ResponseField name="method" type="'prf' | 'rawid'">
+    Method used for key derivation during this authentication.
+  </ResponseField>
+</ResponseField>
+
+### Example
+
+```javascript
+try {
+  const result = await client.authenticate('user-123')
+  console.log('Authenticated:', result)
+  // {
+  //   verified: true,
+  //   publicKey: 'a3f5e8d2...',
+  //   method: 'prf'
+  // }
+  
+  // Use result.publicKey for session token generation
+} catch (error) {
+  console.error('Authentication failed:', error.message)
+}
+```
+
+### Behavior
+
+1. Retrieves stored identity from `localStorage`
+2. Fetches challenge from server (if `serverUrl` configured) or generates one locally
+3. Requests WebAuthn assertion using the stored credential ID
+4. Re-derives the public key using PRF or rawId-HKDF (based on enrollment method)
+5. Validates derived key matches the stored public key
+6. Performs server-side verification if `serverUrl` is configured
+
+### Error Conditions
+
+<ResponseField name="No enrolled credential" type="Error">
+  Thrown when `getIdentity()` returns `null`. User must enroll first.
+</ResponseField>
+
+<ResponseField name="PRF key mismatch" type="Error">
+  Thrown when re-derived PRF key doesn't match stored public key.
+</ResponseField>
+
+<ResponseField name="Key mismatch" type="Error">
+  Thrown when re-derived rawId-HKDF key doesn't match stored public key.
+</ResponseField>
+
+<ResponseField name="Server verification failed" type="Error">
+  Thrown when backend server rejects the authentication attempt.
+</ResponseField>
+
+<ResponseField name="Server public key mismatch" type="Error">
+  Thrown when server-side public key doesn't match expected key.
+</ResponseField>
+
+---
+
+## getIdentity()
+
+Retrieves the currently stored identity from `localStorage`.
+
+```javascript
+const identity = client.getIdentity()
+```
+
+### Returns
+
+<ResponseField name="identity" type="object | null">
+  Returns the stored identity object or `null` if no enrollment exists.
+  
+  See the [Identity type](/api/biokey-js/types#identity) for object structure.
+</ResponseField>
+
+### Example
+
+```javascript
+const identity = client.getIdentity()
+
+if (identity) {
+  console.log('User enrolled on:', new Date(identity.enrolledAt))
+  console.log('Credential ID:', identity.credentialId)
+  console.log('Method:', identity.method)
+} else {
+  console.log('No enrolled credential')
+}
+```
+
+### Use Cases
+
+- Check if user has enrolled before prompting authentication
+- Display enrollment status in UI
+- Access stored credential information
+- Validate enrollment state before operations
+
+---
+
+## clearIdentity()
+
+Removes the stored identity from `localStorage`. Does not revoke the WebAuthn credential itself.
+
+```javascript
+client.clearIdentity()
+```
+
+### Returns
+
+<ResponseField name="void" type="void">
+  This method does not return a value.
+</ResponseField>
+
+### Example
+
+```javascript
+// Log out user
+client.clearIdentity()
+console.log('Identity cleared')
+
+// Verify removal
+const identity = client.getIdentity()
+console.log(identity) // null
+```
+
+### Notes
+
+- This method only removes the local storage entry
+- The underlying WebAuthn credential remains registered with the platform authenticator
+- User can re-enroll to create a new credential
+- Does not communicate with the server or revoke server-side registrations
+
+---
+
+## _serverVerify()
+
+Internal method for server-side authentication verification. Not intended for direct use.
+
+```javascript
+await client._serverVerify(userId, challengeBuf, expectedKey)
+```
+
+### Parameters
+
+<ParamField path="userId" type="string" required>
+  User identifier to verify.
+</ParamField>
+
+<ParamField path="challengeBuf" type="ArrayBuffer" required>
+  Original challenge buffer used for authentication.
+</ParamField>
+
+<ParamField path="expectedKey" type="string" required>
+  Hex-encoded public key that should match server records.
+</ParamField>
+
+### Returns
+
+<ResponseField name="void" type="Promise<void>">
+  Resolves if verification succeeds, throws if it fails.
+</ResponseField>
+
+### Behavior
+
+1. Converts challenge buffer to hex string
+2. Sends POST request to `{serverUrl}/verify` with `userId` and `challenge`
+3. Validates response indicates `verified: true`
+4. Confirms server's `publicKey` matches `expectedKey`
+
+### Error Conditions
+
+- Network request fails
+- Server returns `verified: false`
+- Public key mismatch between client and server
+
+### Note
+
+This method is called automatically by `authenticate()` when `serverUrl` is configured. You should not need to call it directly.

@@ -1,0 +1,87 @@
+---
+title: 'enroll()'
+description: 'Create a new biometric identity'
+---
+
+The `enroll()` function creates a new WebAuthn credential with PRF extension support and derives a deterministic identity key.
+
+## Function Signature
+
+```javascript
+import { enroll } from '@biokey/core'
+
+const identity = await enroll(rpId, rpName)
+```
+
+## Parameters
+
+<ParamField path="rpId" type="string" required>
+  Relying Party ID - typically your domain (e.g., `'example.com'`)
+</ParamField>
+
+<ParamField path="rpName" type="string" default="'BioKey'">
+  Relying Party name displayed to the user during enrollment
+</ParamField>
+
+## Return Value
+
+Returns a Promise that resolves to an identity object:
+
+<ResponseField name="publicKey" type="string">
+  Hex-encoded 32-byte public key derived from PRF output or rawId-HKDF
+</ResponseField>
+
+<ResponseField name="credentialId" type="string">
+  Hex-encoded credential ID (from `credential.rawId`)
+</ResponseField>
+
+<ResponseField name="enrolledAt" type="number">
+  Unix timestamp (milliseconds) when enrollment occurred
+</ResponseField>
+
+<ResponseField name="method" type="'prf' | 'rawid'">
+  - `'prf'`: WebAuthn PRF extension was used (hardware-backed secret)
+  - `'rawid'`: Fallback HKDF derivation from credential rawId
+</ResponseField>
+
+## How It Works
+
+1. **PRF Extension**: Attempts to use the WebAuthn PRF extension with a fixed salt (`PRF_SALT`)
+2. **Hardware-Backed Secret**: If PRF is supported, the authenticator returns a deterministic 32-byte secret
+3. **Fallback**: If PRF is unavailable, derives a key from the credential's rawId using HKDF-SHA256
+4. **No Server Required**: All cryptographic operations happen client-side
+
+## Example
+
+```javascript
+import { enroll } from '@biokey/core'
+
+try {
+  const identity = await enroll('example.com', 'My App')
+  
+  console.log('Enrollment successful!')
+  console.log('Method:', identity.method) // 'prf' or 'rawid'
+  console.log('Public Key:', identity.publicKey)
+  
+  // Store identity for later authentication
+  localStorage.setItem('biokey-identity', JSON.stringify(identity))
+} catch (error) {
+  console.error('Enrollment failed:', error)
+}
+```
+
+## WebAuthn Configuration
+
+The function configures WebAuthn credentials with:
+
+- **Challenge**: 32 random bytes
+- **User ID**: 16 random bytes
+- **Algorithms**: ES256 (-7), EdDSA (-8), RS256 (-257)
+- **Authenticator**: Platform authenticator required
+- **User Verification**: Required
+- **Resident Key**: Preferred (for passkey support)
+- **Timeout**: 60 seconds
+
+## Source Reference
+
+See `/packages/biokey-core/src/enroll.js:9`

@@ -1,0 +1,565 @@
+---
+title: Vanilla JavaScript
+description: Complete example using BioKey with vanilla JavaScript
+---
+
+This example demonstrates how to build a biometric authentication system using vanilla JavaScript and the BioKey library. No frameworks required.
+
+## Quick Start
+
+Create a simple biometric login interface using pure JavaScript. This example uses the lower-level `biokey-core` library for maximum control.
+
+### Installation
+
+<CodeGroup>
+
+```bash npm
+npm install biokey-core
+```
+
+```bash yarn
+yarn add biokey-core
+```
+
+```bash pnpm
+pnpm add biokey-core
+```
+
+</CodeGroup>
+
+## Complete Example
+
+Here's a full implementation with enrollment and authentication:
+
+<CodeGroup>
+
+```html index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BioKey Authentication</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <h1>BioKey Authentication</h1>
+    
+    <div class="status-card">
+      <div class="status-header">
+        <span>Status:</span>
+        <span id="status" class="badge">Not Enrolled</span>
+      </div>
+      
+      <div id="key-display" class="key-display" style="display: none;">
+        <label>Identity Key:</label>
+        <code id="public-key"></code>
+      </div>
+    </div>
+
+    <div id="message" class="message"></div>
+
+    <div class="actions">
+      <button id="enroll-btn" class="btn btn-primary">
+        Enroll Fingerprint
+      </button>
+      <button id="auth-btn" class="btn btn-secondary" disabled>
+        Authenticate
+      </button>
+      <button id="reset-btn" class="btn btn-ghost" style="display: none;">
+        Reset
+      </button>
+    </div>
+
+    <p class="note">
+      Requires HTTPS or localhost. Your biometric data never leaves your device.
+    </p>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
+```
+
+```javascript app.js
+import { enroll, authenticate, getIdentity, clearIdentity } from './biokey.js'
+
+const enrollBtn = document.getElementById('enroll-btn')
+const authBtn = document.getElementById('auth-btn')
+const resetBtn = document.getElementById('reset-btn')
+const statusEl = document.getElementById('status')
+const messageEl = document.getElementById('message')
+const keyDisplay = document.getElementById('key-display')
+const publicKeyEl = document.getElementById('public-key')
+
+// Format hex key for display
+function formatKey(hex) {
+  return hex.match(/.{8}/g).join(' ')
+}
+
+// Show status message
+function showMessage(type, text) {
+  messageEl.className = `message message-${type}`
+  messageEl.textContent = text
+  messageEl.style.display = 'block'
+}
+
+function hideMessage() {
+  messageEl.style.display = 'none'
+}
+
+// Update UI based on enrollment status
+function updateUI() {
+  const identity = getIdentity()
+  
+  if (identity) {
+    statusEl.textContent = 'Enrolled'
+    statusEl.className = 'badge badge-success'
+    keyDisplay.style.display = 'block'
+    publicKeyEl.textContent = formatKey(identity.publicKey)
+    enrollBtn.disabled = true
+    enrollBtn.textContent = 'Already Enrolled'
+    authBtn.disabled = false
+    resetBtn.style.display = 'inline-block'
+  } else {
+    statusEl.textContent = 'Not Enrolled'
+    statusEl.className = 'badge'
+    keyDisplay.style.display = 'none'
+    enrollBtn.disabled = false
+    enrollBtn.textContent = 'Enroll Fingerprint'
+    authBtn.disabled = true
+    resetBtn.style.display = 'none'
+  }
+}
+
+// Enroll fingerprint
+enrollBtn.addEventListener('click', async () => {
+  enrollBtn.disabled = true
+  enrollBtn.textContent = 'Waiting for fingerprint...'
+  hideMessage()
+
+  try {
+    const result = await enroll()
+    showMessage('success', '✓ Enrollment successful! Your identity key has been created.')
+    console.log('Enrolled:', result)
+    updateUI()
+  } catch (err) {
+    showMessage('error', `✗ Enrollment failed: ${err.message}`)
+    enrollBtn.disabled = false
+    enrollBtn.textContent = 'Enroll Fingerprint'
+  }
+})
+
+// Authenticate with fingerprint
+authBtn.addEventListener('click', async () => {
+  authBtn.disabled = true
+  authBtn.textContent = 'Waiting for fingerprint...'
+  hideMessage()
+
+  try {
+    const result = await authenticate()
+    showMessage('success', '✓ Authentication successful! Identity verified.')
+    console.log('Authenticated:', result)
+  } catch (err) {
+    showMessage('error', `✗ Authentication failed: ${err.message}`)
+  } finally {
+    authBtn.disabled = false
+    authBtn.textContent = 'Authenticate'
+  }
+})
+
+// Reset enrollment
+resetBtn.addEventListener('click', () => {
+  if (confirm('Are you sure you want to reset enrollment?')) {
+    clearIdentity()
+    hideMessage()
+    updateUI()
+  }
+})
+
+// Initialize UI
+updateUI()
+```
+
+```javascript biokey.js
+const STORAGE_KEY = 'biokey_identity'
+
+// Utility: Buffer to hex string
+function bufToHex(buf) {
+  return [...new Uint8Array(buf)]
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+// Utility: Hex string to buffer
+function hexToBuf(hex) {
+  return new Uint8Array(
+    hex.match(/.{2}/g).map(b => parseInt(b, 16))
+  ).buffer
+}
+
+// Derive identity key from credential rawId using HKDF
+async function deriveIdentityKey(rawId) {
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    rawId,
+    { name: 'HKDF' },
+    false,
+    ['deriveBits']
+  )
+  
+  return crypto.subtle.deriveBits(
+    {
+      name: 'HKDF',
+      hash: 'SHA-256',
+      salt: new TextEncoder().encode('biokey-v0-salt'),
+      info: new TextEncoder().encode('biokey-identity-key')
+    },
+    keyMaterial,
+    256
+  )
+}
+
+// Enroll a new biometric credential
+export async function enroll() {
+  const challenge = crypto.getRandomValues(new Uint8Array(32))
+  const userId = crypto.getRandomValues(new Uint8Array(16))
+
+  const credential = await navigator.credentials.create({
+    publicKey: {
+      challenge,
+      rp: {
+        name: 'BioKey',
+        id: location.hostname
+      },
+      user: {
+        id: userId,
+        name: 'biokey-user',
+        displayName: 'BioKey User'
+      },
+      pubKeyCredParams: [
+        { alg: -7, type: 'public-key' },   // ES256
+        { alg: -8, type: 'public-key' },   // EdDSA
+        { alg: -257, type: 'public-key' }  // RS256
+      ],
+      authenticatorSelection: {
+        authenticatorAttachment: 'platform',
+        userVerification: 'required',
+        residentKey: 'preferred'
+      },
+      timeout: 60000
+    }
+  })
+
+  // Derive deterministic identity key from credential
+  const identityBits = await deriveIdentityKey(credential.rawId)
+  const publicKey = bufToHex(identityBits)
+  const credentialId = bufToHex(credential.rawId)
+
+  // Store identity locally
+  const identity = { credentialId, publicKey }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(identity))
+
+  return identity
+}
+
+// Authenticate using enrolled credential
+export async function authenticate() {
+  const stored = JSON.parse(localStorage.getItem(STORAGE_KEY))
+  if (!stored) {
+    throw new Error('No enrolled credential. Enroll first.')
+  }
+
+  const challenge = crypto.getRandomValues(new Uint8Array(32))
+
+  const assertion = await navigator.credentials.get({
+    publicKey: {
+      challenge,
+      rpId: location.hostname,
+      allowCredentials: [{
+        id: hexToBuf(stored.credentialId),
+        type: 'public-key'
+      }],
+      userVerification: 'required',
+      timeout: 60000
+    }
+  })
+
+  return {
+    verified: true,
+    publicKey: stored.publicKey
+  }
+}
+
+// Get current identity
+export function getIdentity() {
+  const raw = localStorage.getItem(STORAGE_KEY)
+  return raw ? JSON.parse(raw) : null
+}
+
+// Clear stored identity
+export function clearIdentity() {
+  localStorage.removeItem(STORAGE_KEY)
+}
+```
+
+```css styles.css
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.container {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  padding: 40px;
+  max-width: 500px;
+  width: 100%;
+}
+
+h1 {
+  font-size: 28px;
+  margin-bottom: 30px;
+  color: #1a202c;
+  text-align: center;
+}
+
+.status-card {
+  background: #f7fafc;
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.badge {
+  background: #e2e8f0;
+  color: #4a5568;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.badge-success {
+  background: #c6f6d5;
+  color: #22543d;
+}
+
+.key-display {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.key-display label {
+  display: block;
+  font-size: 12px;
+  color: #718096;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.key-display code {
+  display: block;
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 11px;
+  color: #2d3748;
+  background: white;
+  padding: 10px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.message {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  display: none;
+}
+
+.message-success {
+  background: #c6f6d5;
+  color: #22543d;
+  border: 1px solid #9ae6b4;
+}
+
+.message-error {
+  background: #fed7d7;
+  color: #742a2a;
+  border: 1px solid #fc8181;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  flex: 1;
+  min-width: 140px;
+  padding: 12px 20px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #667eea;
+  color: white;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #5a67d8;
+}
+
+.btn-secondary {
+  background: #48bb78;
+  color: white;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #38a169;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: #e53e3e;
+  border: 1px solid #e53e3e;
+}
+
+.btn-ghost:hover {
+  background: #fff5f5;
+}
+
+.note {
+  margin-top: 20px;
+  font-size: 12px;
+  color: #718096;
+  text-align: center;
+  line-height: 1.6;
+}
+```
+
+</CodeGroup>
+
+## How It Works
+
+### 1. Enrollment Flow
+
+When a user enrolls:
+
+1. Generate a random challenge and user ID
+2. Call `navigator.credentials.create()` to create a platform authenticator credential
+3. User authenticates with their fingerprint/Face ID
+4. Derive a deterministic identity key from the credential's `rawId` using HKDF
+5. Store the credential ID and public key in localStorage
+
+### 2. Authentication Flow
+
+When a user authenticates:
+
+1. Retrieve the stored credential ID from localStorage
+2. Generate a new challenge
+3. Call `navigator.credentials.get()` with the credential ID
+4. User authenticates with their biometric
+5. Verify the authentication succeeded
+
+### 3. Key Derivation
+
+The identity key is derived using HKDF (HMAC-based Key Derivation Function):
+
+```javascript
+HKDF-SHA256(
+  rawId,           // Input key material
+  'biokey-v0-salt',     // Salt
+  'biokey-identity-key' // Info
+) → 256-bit identity key
+```
+
+This ensures the same biometric always produces the same identity key.
+
+## Running the Example
+
+### Using Vite (Recommended)
+
+<CodeGroup>
+
+```bash Setup
+npm install -D vite
+```
+
+```bash Run
+npx vite
+```
+
+</CodeGroup>
+
+### Using Python
+
+```bash
+python -m http.server 8000 --bind localhost
+```
+
+### Using Node.js
+
+```bash
+npx serve .
+```
+
+<Note>
+**Important:** WebAuthn requires HTTPS or localhost. Make sure you're testing on `localhost` or a secure origin.
+</Note>
+
+## Browser Compatibility
+
+This example uses the WebAuthn API with platform authenticators:
+
+- Chrome/Edge 87+
+- Safari 14+
+- Firefox 60+
+
+Devices must have:
+- Touch ID (macOS)
+- Face ID (iOS/iPadOS)
+- Windows Hello (Windows)
+- Fingerprint sensor (Android)
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="React Example" icon="react" href="/examples/react-app">
+    See how to integrate BioKey with React using hooks
+  </Card>
+  <Card title="Full-Stack Example" icon="server" href="/examples/full-stack">
+    Build a complete client-server authentication system
+  </Card>
+</CardGroup>
